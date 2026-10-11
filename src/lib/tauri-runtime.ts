@@ -1,5 +1,59 @@
-import type { Channel, InvokeOptions } from "@tauri-apps/api/core";
-import { IS_DEV_BUILD } from "./build-env";
+import { Channel, invoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
+import { diagnosticLog, diagnosticResultSummary } from "./diagnostics";
+import { markProfileIpc, markStartup } from "./startup-marks";
+import { IS_DEV_BUILD, IS_WEB_RUNTIME } from "./build-env";
+
+function errorMessage(cause: unknown): string {
+	if (cause instanceof Error) return cause.message;
+	if (String(cause) === cause) return cause;
+	if (hasMessage(cause)) {
+		const message = cause.message;
+		if (String(message) === message) return message;
+	}
+	return String(cause);
+}
+
+function hasMessage<Value>(value: Value): value is Value & { message?: string } {
+	return value !== null && Object(value) === value && "message" in Object(value);
+}
+
+export function createNativeTauriClient(): TauriClient {
+	return {
+		createChannel: (onMessage) => new Channel(onMessage),
+		invoke: async <T, Args extends object = object>(
+			cmd: string,
+			args?: Args,
+			options?: InvokeOptions,
+		): Promise<T> => {
+			const started = performance.now();
+			diagnosticLog("tauri.invoke.start", {
+				cmd,
+				args: args ? Object.keys(args).join(",") : "",
+			});
+			try {
+				// SAFETY: typed wrappers pass Tauri-serializable command objects; Tauri validates IPC encoding.
+				const result = await invoke<T>(cmd, args as InvokeArgs | undefined, options);
+				markProfileIpc(cmd, started, true);
+				if (cmd === "get_kubeconfig_sources") markStartup("kubeconfig-ready");
+				diagnosticLog("tauri.invoke.done", {
+					cmd,
+					ms: Math.round(performance.now() - started),
+					result: diagnosticResultSummary(result),
+				});
+				return result;
+			} catch (error) {
+				markProfileIpc(cmd, started, false);
+				diagnosticLog("tauri.invoke.error", {
+					cmd,
+					ms: Math.round(performance.now() - started),
+					error: errorMessage(error),
+				});
+				console.error(`[k8s-manager:tauri] ${cmd} error`, error);
+				throw error;
+			}
+		},
+	};
+}
 
 interface BrowserDevEnv {
 	DEV?: boolean;
@@ -11,6 +65,7 @@ interface TauriRuntimeGlobal {
 }
 
 export interface TauriClient {
+	createChannel?<T>(onMessage: (message: T) => void): Channel<T>;
 	invoke<T, Args extends object = object>(
 		cmd: string,
 		args?: Args,
@@ -48,7 +103,15 @@ export function shouldUseBrowserDevMocks(
 	// SAFETY: globalThis is the runtime object whose optional Tauri markers this function reads.
 	scope: TauriRuntimeGlobal = globalThis as TauriRuntimeGlobal,
 ): boolean {
-	return env.DEV === true && !isTauriRuntime(scope);
+	return !IS_WEB_RUNTIME && env.DEV === true && !isTauriRuntime(scope);
+}
+
+export function isBrowserRuntime(): boolean {
+	return IS_WEB_RUNTIME;
+}
+
+export function getChannelId<T>(channel: Channel<T>): number {
+	return channel.id;
 }
 
 export function isBrowserDevMockMode(): boolean {
@@ -81,6 +144,7 @@ export function createMockTauriClient<Responses extends object>(
 	mockResponses: Responses,
 ): TauriClient {
 	return {
+		createChannel: (onMessage) => createMockChannel(onMessage),
 		invoke: async <T, Args extends object = object>(
 			cmd: string,
 			args?: Args,

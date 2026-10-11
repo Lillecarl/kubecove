@@ -198,7 +198,7 @@
 				logStatus = "stopped";
 				logMessage = "Log stream stopped";
 			}
-		});
+		}, client);
 		const start =
 			logRequest.mode === "aggregate"
 				? startAggregatedLogStream(client, logRequest.request, channel)

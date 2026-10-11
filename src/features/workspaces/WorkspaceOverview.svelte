@@ -12,6 +12,7 @@
 		Clock3,
 	} from "lucide-svelte";
 	import FriendlyError from "@/components/FriendlyError.svelte";
+	import ResourceScopeWarnings from "@/features/resources/ResourceScopeWarnings.svelte";
 	import {
 		Alert,
 		AlertDescription,
@@ -142,9 +143,6 @@
 	const workspaceFetchKeys = $derived(
 		buildWorkspaceFetchKeys(workspace.scope, availableNamespaces),
 	);
-	const workspaceFetchCoverage = $derived(
-		buildWorkspaceFetchPlans(workspace.scope, availableNamespaces),
-	);
 	const resourceQueryKey = $derived(
 		queryKeys.resources(workspaceContextKey, workspaceFetchKeys, kubeconfigSourceKey),
 	);
@@ -176,11 +174,11 @@
 			successfulResourceRetryKey = retryKey;
 		}
 	}
-	const rows = $derived(resourcesQuery.data ?? []);
+	const rows = $derived(resourcesQuery.data?.resources ?? []);
 	const entryPoints = $derived(normalizeEntryPoints(workspace.entryPoints));
 	$effect(() => {
 		if (resourcesQuery.isSuccess && !resourcesQuery.isPlaceholderData) {
-			onReconcileEntryPoints(resourcesQuery.data ?? [], workspaceFetchCoverage);
+			onReconcileEntryPoints(rows, resourcesQuery.data?.coverage ?? []);
 		}
 	});
 	const health = $derived(buildWorkspaceHealthSummary(rows));
@@ -348,6 +346,9 @@
 				<p role="status" class="text-xs text-emerald-300">
 					Workspace resources loaded successfully after retry.
 				</p>
+			{/if}
+			{#if resourcesQuery.isSuccess}
+				<ResourceScopeWarnings failures={resourcesQuery.data?.failures ?? []} />
 			{/if}
 
 			{#if hasIncidentShortcuts}

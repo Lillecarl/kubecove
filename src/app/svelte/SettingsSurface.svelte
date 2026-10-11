@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import {
 		Bug,
 		Cable,
@@ -8,8 +9,8 @@
 		Search,
 		SlidersHorizontal,
 	} from "lucide-svelte";
-	import { openUrl } from "@tauri-apps/plugin-opener";
 	import {
+		Badge,
 		Button,
 		buttonClass,
 		FieldGroup,
@@ -20,9 +21,15 @@
 	import FriendlyError from "@/components/FriendlyError.svelte";
 	import type { TimestampTimezone, YamlDiffStyle } from "@/lib/settings";
 	import { IS_DEV_BUILD } from "@/lib/build-env";
-	import { isTauriRuntime } from "@/lib/tauri-runtime";
+	import { isBrowserRuntime, isTauriRuntime } from "@/lib/tauri-runtime";
+	import {
+		getBrowserSessionState,
+		subscribeBrowserSession,
+		type BrowserSessionState,
+	} from "@/lib/browser-runtime";
 	import type { YamlEncoding, YamlViewMode } from "@/lib/types";
 	import ArgoConnectionSettings from "./ArgoConnectionSettings.svelte";
+	import RemoteConnectionSettings from "./RemoteConnectionSettings.svelte";
 	import DiagnosticsSettings from "./DiagnosticsSettings.svelte";
 	import KubeconfigSettings from "./KubeconfigSettings.svelte";
 	import SettingsRow from "./SettingsRow.svelte";
@@ -36,7 +43,8 @@
 		| "kubeconfig"
 		| "updates"
 		| "diagnostics"
-		| "argo";
+		| "argo"
+		| "remote";
 	type SettingsRowMeta = { title: string; description: string };
 
 	const WIKI_URL = "https://github.com/Timpan4/kubecove/wiki";
@@ -154,6 +162,11 @@
 		},
 	} satisfies Record<string, SettingsRowMeta>;
 
+	const SERVER_INFO_ROW: SettingsRowMeta = {
+		title: "Server information",
+		description: "KubeCove server version and active credential storage on this host.",
+	};
+
 	const DIAGNOSTICS_ROWS: SettingsRowMeta[] = [
 		{
 			title: "Enable diagnostics",
@@ -177,13 +190,19 @@
 	}
 
 	const categoryRows = {
-		general: Object.values(GENERAL_ROWS),
+		general: [
+			...Object.values(GENERAL_ROWS),
+			...(isBrowserRuntime() ? [SERVER_INFO_ROW] : []),
+		],
 		sessions: Object.values(SESSION_ROWS),
 		yaml: Object.values(YAML_ROWS),
 		kubeconfig: Object.values(KUBECONFIG_ROWS),
-		updates: Object.values(UPDATES_ROWS),
+		updates: !isBrowserRuntime() ? Object.values(UPDATES_ROWS) : [],
 		diagnostics: DIAGNOSTICS_ROWS,
 		argo: [{ title: "Argo CD connection", description: "Connect to Argo CD without storing credentials in settings." }],
+		remote: !isBrowserRuntime() && isTauriRuntime()
+			? [{ title: "Remote KubeCove server", description: "Connect this desktop to a headless KubeCove host." }]
+			: [],
 	} satisfies Record<SettingsCategoryId, SettingsRowMeta[]>;
 
 	const categories: Array<{ id: SettingsCategoryId; label: string }> = [
@@ -191,12 +210,15 @@
 		{ id: "sessions", label: "Live sessions" },
 		{ id: "yaml", label: "YAML" },
 		{ id: "kubeconfig", label: "Kubeconfig" },
-		{ id: "updates", label: "Updates" },
+		...(!isBrowserRuntime() ? [{ id: "updates" as const, label: "Updates" }] : []),
 		{ id: "diagnostics", label: "Diagnostics" },
 		{ id: "argo", label: "Argo CD" },
+		...(!isBrowserRuntime() && isTauriRuntime() ? [{ id: "remote" as const, label: "Remote server" }] : []),
 	];
 
 	let activeCategory = $state<SettingsCategoryId>("general");
+	const browserRuntime = isBrowserRuntime();
+	let browserSession = $state<BrowserSessionState>(getBrowserSessionState());
 	let query = $state("");
 	let documentationError = $state<unknown>(null);
 	let {
@@ -211,6 +233,27 @@
 		kubeconfigEnvVar?: string;
 	} = $props();
 	const settings = $derived($settingsStore);
+
+	onMount(() =>
+		browserRuntime
+			? subscribeBrowserSession((state) => {
+					browserSession = state;
+				})
+			: undefined,
+	);
+
+	const credentialStoreLabel = $derived.by(() => {
+		const store = browserSession.credentialStore;
+		if (!store) return "Not reported";
+		const normalized = store.toLowerCase();
+		if (normalized.includes("encrypted") || normalized.includes("file")) {
+			return "Encrypted file storage";
+		}
+		if (normalized.includes("native") || normalized.includes("keyring")) {
+			return "Native credential storage";
+		}
+		return store;
+	});
 
 	const searching = $derived(query.trim().length > 0);
 	const heading = $derived(
@@ -240,9 +283,10 @@
 	}
 
 	async function openDocumentation(event: MouseEvent): Promise<void> {
-		if (!isTauriRuntime()) return;
+		if (isBrowserRuntime() || !isTauriRuntime()) return;
 		event.preventDefault();
 		try {
+			const { openUrl } = await import("@tauri-apps/plugin-opener");
 			await openUrl(WIKI_URL);
 			documentationError = null;
 		} catch (error) {
@@ -330,6 +374,12 @@
 					mode="compact"
 					context={{ fallbackTitle: "KubeCove could not open the documentation" }}
 				/>
+			{/if}
+			{#if browserRuntime}
+				<SettingsRow {...SERVER_INFO_ROW}>
+					<Badge variant="outline">Server {browserSession.serverVersion ?? "Unknown"}</Badge>
+					<Badge variant="secondary">{credentialStoreLabel}</Badge>
+				</SettingsRow>
 			{/if}
 			<SettingsRow {...GENERAL_ROWS.exactTimestamps}>
 				<Switch
@@ -482,6 +532,14 @@
 
 		{#if showCategory("argo")}
 			<ArgoConnectionSettings {clusterContext} {workspaceId} {kubeconfigEnvVar} />
+		{/if}
+
+		{#if showCategory("remote") && isTauriRuntime()}
+			<FieldGroup>
+				<SettingsRow {...categoryRows.remote[0]}>
+					<RemoteConnectionSettings />
+				</SettingsRow>
+			</FieldGroup>
 		{/if}
 
 	</section>

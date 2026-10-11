@@ -1,6 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import { kubeconfigArg, sanitizeKubeconfigRequest } from "./tauri-args";
-import { createMockChannel, shouldUseBrowserDevMocks, type TauriClient } from "./tauri-runtime";
+import { createMockChannel, isBrowserRuntime, shouldUseBrowserDevMocks, type TauriClient } from "./tauri-runtime";
 import type {
 	AggregatedLogStreamRequest,
 	LiveSessionCleanupRequest,
@@ -18,8 +18,13 @@ import type {
 
 export function createStreamChannel(
 	onMessage: (message: StreamMessage) => void,
+	client?: TauriClient,
 ): Channel<StreamMessage> {
+	if (client?.createChannel) return client.createChannel(onMessage);
 	if (shouldUseBrowserDevMocks()) return createMockChannel(onMessage);
+	if (isBrowserRuntime()) {
+		throw new Error("A Tauri client is required to create a browser stream channel.");
+	}
 	return new Channel<StreamMessage>(onMessage);
 }
 
@@ -48,8 +53,13 @@ export function closeStreamChannel(channel: Channel<StreamMessage>): void {
 
 export function createPodExecChannel(
 	onMessage: (message: PodExecSessionMessage) => void,
+	client?: TauriClient,
 ): Channel<PodExecSessionMessage> {
+	if (client?.createChannel) return client.createChannel(onMessage);
 	if (shouldUseBrowserDevMocks()) return createMockChannel(onMessage);
+	if (isBrowserRuntime()) {
+		throw new Error("A Tauri client is required to create a browser exec channel.");
+	}
 	return new Channel<PodExecSessionMessage>(onMessage);
 }
 

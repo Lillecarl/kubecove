@@ -434,7 +434,7 @@
 				return;
 			}
 			invalidateSoon();
-		});
+		}, client);
 		void startResourceWatch(
 			client,
 			resource.cluster,
@@ -483,7 +483,7 @@
 				return;
 			}
 			if (event.type === "resourceEventsChanged") invalidateSoon();
-		});
+		}, client);
 		void startResourceEventWatch(
 			client,
 			readSpec.eventWatch.cluster,

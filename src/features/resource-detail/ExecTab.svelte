@@ -257,7 +257,7 @@
 					invalidateQueries: (options) => queryClient.invalidateQueries(options),
 				});
 			}
-			const nextChannel = createPodExecChannel(handleMessage);
+			const nextChannel = createPodExecChannel(handleMessage, client);
 			channel = nextChannel;
 			status = "starting";
 			message = "Starting exec session";

@@ -46,6 +46,7 @@
 		ArgoAppProjectSummary,
 		DiscoveredResourceKind,
 		ResourceSummary,
+		ResourceScopeResult,
 	} from "@/lib/types";
 	import type { SavedWorkspace } from "@/lib/workspace-model";
 	import type { WorkspaceReadContext } from "@/lib/workspaceReadContext";
@@ -138,7 +139,7 @@
 			fluxDetectionQuery.data?.kinds ?? [],
 		),
 	);
-	const resourcesQuery = createQuery<ResourceSummary[]>(() => ({
+	const resourcesQuery = createQuery<ResourceScopeResult>(() => ({
 		queryKey: queryKeys.resources(workspace.scope.clusterContext, fetchKeys, kubeconfigSourceKey),
 		queryFn: () => fetchResourcePage(workspace.scope.clusterContext, fetchKeys, kubeconfigSourceKey),
 		enabled: open && sourceReady && gitOpsDetectionReady && fetchKeys.length > 0,
@@ -167,14 +168,14 @@
 	);
 	const resourceSearchIndex = $derived.by(() => {
 		if (!open) return [];
-		const warmedRows = resourcesQuery.data ?? [];
-		const cached = queryClient.getQueriesData<ResourceSummary[]>({
+		const warmedRows = resourcesQuery.data?.resources ?? [];
+		const cached = queryClient.getQueriesData<Pick<ResourceScopeResult, "resources">>({
 			queryKey: ["resources", normalizedSourceKey, workspace.scope.clusterContext],
 		});
 		return buildDedupedResourceSearchIndex([
 			warmedRows,
 			argoSearchResources,
-			...cached.map(([, rows]) => rows ?? []),
+			...cached.map(([, result]) => result?.resources ?? []),
 		]);
 	});
 	const visibleResources = $derived(

@@ -32,7 +32,7 @@ import type {
 	ArgoOperationRequest,
 	ArgoServerEndpoint,
 } from "./gitops-types";
-import type { TauriClient } from "./tauri-runtime";
+import { createMockChannel, type TauriClient } from "./tauri-runtime";
 import type {
 	AppUsageMetrics,
 	ArgoApplicationDetails,
@@ -103,6 +103,7 @@ function readMockArgs<Args extends object>(args: Args | undefined): MockArgs {
 
 export function createDevMockTauriClient(): TauriClient {
 	return {
+		createChannel: (onMessage) => createMockChannel(onMessage),
 		invoke: async <T, Args extends object = object>(
 			cmd: string,
 			args?: Args,
@@ -136,7 +137,11 @@ const handlers = {
 	list_deployment_revisions: () => deploymentRevisions,
 	...operationMockHandlers,
 	list_dynamic_resources: (args) => filterResources(args?.resourceKind?.kind, args?.namespace ?? undefined, args?.clusterContext),
-	list_resource_scope: (args) => listScope(args?.requests, args?.clusterContext),
+	list_resource_scope: (args) => ({
+		resources: listScope(args?.requests, args?.clusterContext),
+		completedRequests: args?.requests ?? [],
+		failures: [],
+	}),
 	get_resource_yaml: (args) => builtInYamlFor(args),
 	get_resource_details: (args) => detailsFor(args),
 	get_dynamic_resource_details: (args) => detailsFor(args),

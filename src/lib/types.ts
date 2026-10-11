@@ -62,6 +62,8 @@ export type ResourceListRequest =
 			kind?: never;
 	  };
 
+export type { ResourceScopeFailure, ResourceScopeResult } from "./resource-scope-types";
+
 export interface DeploymentRevision {
 	name: string;
 	revision?: number;

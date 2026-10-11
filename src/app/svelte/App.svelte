@@ -19,6 +19,7 @@
 	import ForegroundLoadingBar from "./ForegroundLoadingBar.svelte";
 	import { workspaceStore } from "@/features/workspaces/workspaceStore";
 	import { diagnosticLog, setDiagnosticsEnabled } from "@/lib/diagnostics";
+	import { desktopRemoteConnection } from "@/lib/remote-runtime";
 	import { isAppUpdatesEnabled } from "@/lib/release-channel";
 	import { kubeconfigSourcesQueryOptions } from "@/lib/kubeconfig-sources-query";
 	import {
@@ -60,6 +61,8 @@
 	let lastDiagnosticsEnabled: boolean | null = null;
 	let liveSessionScopeInitialized = false;
 	let lastLiveSessionCleanupKey = "";
+	let remoteScopeInitialized = false;
+	let lastRemoteScope: string | null = null;
 
 	const workspaceTransition = createWorkspaceTransitionCoordinator<WorkspaceDestination>({
 		suspend: async () => {
@@ -179,6 +182,18 @@
 	}
 
 	$effect(() => {
+		const remoteScope = $desktopRemoteConnection?.serverUrl ?? null;
+		if (!remoteScopeInitialized) {
+			remoteScopeInitialized = true;
+			lastRemoteScope = remoteScope;
+			return;
+		}
+		if (lastRemoteScope === remoteScope) return;
+		lastRemoteScope = remoteScope;
+		void queryClient.resetQueries();
+	});
+
+	$effect(() => {
 		const enabled = $settingsStore.debugModeEnabled;
 		if (lastDiagnosticsEnabled === enabled) return;
 		lastDiagnosticsEnabled = enabled;
@@ -254,7 +269,7 @@
 
 <TooltipProvider>
 	{#if workspaceTransitionPending}
-	<div class="flex h-screen w-full items-center justify-center bg-background text-sm text-muted-foreground">
+	<div class="flex h-full w-full items-center justify-center bg-background text-sm text-muted-foreground">
 		Switching workspace…
 	</div>
 {:else if $selectedWorkspace}
@@ -275,7 +290,7 @@
 		{/snippet}
 	</DeferredSurface>
 {:else}
-	<div class="flex h-screen w-full flex-col overflow-hidden bg-background text-foreground">
+	<div class="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
 		<ForegroundLoadingBar />
 		<header class="flex h-12 shrink-0 items-center gap-4 border-b bg-sidebar px-4 [-webkit-app-region:drag]">
 			<div class="flex min-w-0 flex-1 items-center gap-2 [-webkit-app-region:no-drag]">

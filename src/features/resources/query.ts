@@ -5,7 +5,7 @@ import { createTauriClient, isAppError, listResourceScope } from "@/lib/tauri";
 import type {
 	CancellableRequest,
 	ResourceListRequest,
-	ResourceSummary,
+	ResourceScopeResult,
 } from "@/lib/types";
 import {
 	type FetchKey,
@@ -26,7 +26,7 @@ export async function fetchResourcePage(
 	fetchKeys: FetchKey[],
 	kubeconfigEnvVar?: string,
 	cancelScope?: string,
-): Promise<ResourceSummary[]> {
+): Promise<ResourceScopeResult> {
 	const started = performance.now();
 	const cancellable: CancellableRequest | undefined = cancelScope
 		? createFiniteReadRequest(cancelScope, "resources")
@@ -56,7 +56,7 @@ export async function fetchResourcePage(
 	diagnosticLog("resources.fetch.done", {
 		cluster: clusterContext,
 		fetches: fetchKeys.length,
-		rows: rows.length,
+		rows: rows.resources.length,
 		ms: Math.round(performance.now() - started),
 	});
 	return rows;
