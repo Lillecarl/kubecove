@@ -54,6 +54,37 @@ OIDC mode initially supports the browser client. Native desktop remote connectio
 continue to use token-mode servers. Native OIDC requires a separate external-browser
 flow and is outside this decision.
 
+## Amendment: forwarded Kubernetes credentials
+
+Proposed 2026-10-11. This reverses two rules above for one opt-in flag:
+"do not refresh or retain access, ID or refresh tokens" and "do not
+implicitly grant Kubernetes permissions from OIDC claims". The default is
+unchanged.
+
+With `--oidc-kubernetes-credentials <AUD>`, the server calls the Kubernetes
+API as the signed-in user. `AUD` is the API server's `--oidc-client-id`. The API server authenticates the user's ID token through
+its own `--oidc-*` flags, and RBAC decides per user, as Headlamp does. The
+kubeconfig still selects the cluster and its CA. Its credentials are never
+sent: the server strips them, and a deployment should hold none.
+
+- The server keeps the ID token and refresh token in memory only, beside the
+  opaque cookie's identity. Nothing is written to the data directory.
+- One process-wide slot holds the active owner's ID token. Every Kubernetes
+  request reads it when sent, so a renewed token or a new owner applies to
+  cached clients and watch reconnects. An empty slot sends no credentials.
+- The slot is set when an owner session starts or resumes, and cleared when
+  that owner ends, signs out, or its sign-in expires or is revoked.
+- Only the active owner's token is renewed, 60 seconds before it expires. A
+  renewed ID token must keep the subject and authorized party, and carry no
+  nonce or the login nonce (OIDC Core 12.2). If the provider refuses after
+  the token expired, the sign-in is revoked.
+- The sign-in then lasts until the provider refuses a refresh, capped at 12
+  hours, instead of ending with the first ID token. Without a refresh token
+  it ends with the ID token, as before.
+- The provider must put `AUD` in the token's audience, or sign-in is refused.
+  `AUD` is the only audience trusted beside KubeCove's client ID, and the
+  existing multi-audience rule still requires `azp` to be KubeCove's.
+
 ## Verification
 
 Before implementation, cover successful code exchange and browser-cookie login,
