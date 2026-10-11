@@ -8,7 +8,9 @@ KubeCove installers publish through [GitHub Releases](https://github.com/Timpan4
 - Windows: download NSIS setup executable. Unsigned beta builds may require SmartScreen's More info then Run anyway.
 - Linux: download `.AppImage`, `.deb`, or `.rpm` when present. AppImage may need `chmod +x`.
 
-Installers contain app and normal Tauri runtime files. They do not bundle `kubectl`, Helm, Argo CD, kubeconfigs, tokens, or cluster credentials.
+Installers contain the desktop app and normal Tauri runtime files. They do not bundle `kubectl`, Helm, Argo CD, kubeconfigs, tokens, or cluster credentials.
+
+The release workflow also builds standalone `kubecove-server` archives for Linux x64, macOS x64, and macOS arm64. Each contains the server executable with the browser assets embedded. The server runs without Tauri or webview GUI dependencies and is intended for a single OS user on a remote host, normally reached through SSH forwarding. See [the remote-host operations guide](wiki/Remote-Server.md). Server assets are available only after the matching release completes its publish gates.
 
 Windows releases use NSIS so in-app updates share one installer path. An older MSI install may require one uninstall before NSIS install.
 
@@ -24,7 +26,7 @@ KubeCove is inspection-first outside ADR-approved live sessions and guarded oper
 
 Trusted release PRs skip frontend, Rust, and CodSpeed checks. The exemption requires the same-repository `release/app-v*` branch and `release` label. The short Nix vendor check still validates the version-dependent Cargo hash. Tag builds still run every automated release gate below before publishing.
 
-After merge, GitHub Actions finds merged `release` PR, creates matching annotated `app-vX.Y.Z` tag, runs release workflow, builds installers, verifies updater assets, and publishes release.
+After merge, GitHub Actions finds merged `release` PR, creates matching annotated `app-vX.Y.Z` tag, runs release workflow, builds desktop installers and headless server archives, verifies required assets and updater coverage, then publishes the release.
 
 Manual release-workflow dispatch only reruns an existing `app-v*` tag and preserves release visibility.
 

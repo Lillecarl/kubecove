@@ -7,10 +7,10 @@ use crate::commands::{
 };
 use crate::models::AppErrorKind;
 use crate::models::{AppError, ResourceEventSummary};
+use crate::runtime::State;
 use chrono::{DateTime, Utc};
 use kube::api::Api;
 use std::time::Instant;
-use tauri::State;
 
 fn event_timestamp(event: &k8s_openapi::api::core::v1::Event) -> Option<DateTime<Utc>> {
     event
@@ -121,7 +121,7 @@ pub async fn resource_events_from(
     Ok(events.iter().map(summarize_event).collect())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_resource_events(
     cluster_context: String,
     kind: String,

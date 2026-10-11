@@ -114,7 +114,7 @@ pub fn record_backend_result<T>(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_backend_diagnostics_enabled(enabled: bool) -> bool {
     with_state(|state| {
         state.enabled = enabled;
@@ -134,14 +134,14 @@ fn cache_snapshots(store: &ClusterLiveStore) -> Vec<BackendCacheDiagnosticSnapsh
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_backend_cache_diagnostics(
-    store: tauri::State<'_, ClusterLiveStore>,
+    store: crate::runtime::State<'_, ClusterLiveStore>,
 ) -> Vec<BackendCacheDiagnosticSnapshot> {
     cache_snapshots(&store)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_backend_diagnostics() -> Vec<BackendDiagnosticEvent> {
     stored_backend_diagnostics()
 }
@@ -153,8 +153,8 @@ fn clear_stored_diagnostics() {
     });
 }
 
-#[tauri::command]
-pub fn clear_backend_diagnostics(store: tauri::State<'_, ClusterLiveStore>) {
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn clear_backend_diagnostics(store: crate::runtime::State<'_, ClusterLiveStore>) {
     store.clear_diagnostic_counters();
     clear_stored_diagnostics();
 }

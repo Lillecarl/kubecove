@@ -10,12 +10,12 @@ use crate::commands::{
 };
 use crate::models::AppErrorKind;
 use crate::models::{AppError, YamlEncoding, YamlViewMode};
+use crate::runtime::State;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use kube::Api;
 use std::time::Instant;
-use tauri::State;
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn reveal_secret_data_value(
     cluster_context: String,
     name: String,
@@ -200,7 +200,7 @@ pub(super) async fn resource_yaml_with_client(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_resource_yaml(
     cluster_context: String,
     kind: String,

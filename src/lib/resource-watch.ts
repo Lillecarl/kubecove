@@ -112,7 +112,7 @@ export function observeResourceScope({
 				onChange(event);
 			}
 			publish();
-		});
+		}, client);
 		watch.channel = channel;
 		void startResourceWatch(
 			client,

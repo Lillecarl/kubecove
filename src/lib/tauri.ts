@@ -1,11 +1,14 @@
-import { invoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
+import { Channel, type InvokeOptions } from "@tauri-apps/api/core";
 import { createDevMockTauriClient } from "./tauri-dev-mocks";
 import { cancellableArg, kubeconfigArg } from "./tauri-args";
+import { createBrowserTauriClient } from "./browser-runtime";
+import { getDesktopRemoteTauriClient, isDesktopRemoteSelected } from "./remote-runtime";
 import type {
 	ClusterContext,
 	NamespaceSummary,
 	DiscoveredResourceKind,
 	ResourceListRequest,
+	ResourceScopeResult,
 	ResourceSummary,
 	ResourceEventSummary,
 	ResourceDetailsFull,
@@ -30,21 +33,23 @@ import type {
 	DeploymentRevision,
 	WatchResourceKey,
 } from "./types";
-import { diagnosticLog, diagnosticResultSummary } from "./diagnostics";
-import { markProfileIpc, markStartup } from "./startup-marks";
+import { createNativeTauriClient } from "./tauri-runtime";
 
 export {
 	createMockChannel,
 	createMockTauriClient,
+	getChannelId,
+	isBrowserRuntime,
 	isBrowserDevMockMode,
 	isTauriRuntime,
 	shouldUseBrowserDevMocks,
 } from "./tauri-runtime";
 export type { TauriClient } from "./tauri-runtime";
+export { getDesktopRemoteTauriClient, isDesktopRemoteSelected } from "./remote-runtime";
 export { kubeconfigArg } from "./tauri-args";
 export * from "./tauri-argo";
 export * from "./tauri-streams";
-import { shouldUseBrowserDevMocks } from "./tauri-runtime";
+import { isBrowserRuntime, shouldUseBrowserDevMocks } from "./tauri-runtime";
 import type { TauriClient } from "./tauri-runtime";
 
 const inFlightInvokes = new WeakMap<TauriClient, Map<string, Promise<unknown>>>();
@@ -92,55 +97,27 @@ export function refreshResourceCache(
 	return client.invoke("refresh_resource_cache", { clusterContext, keys, namespaces, ...kubeconfigArg(kubeconfigEnvVar) });
 }
 
-function errorMessage(cause: unknown): string {
-	if (cause instanceof Error) return cause.message;
-	if (String(cause) === cause) return cause;
-	if (hasMessage(cause)) {
-		const message = cause.message;
-		if (String(message) === message) return message;
-	}
-	return String(cause);
-}
-
-function hasMessage<Value>(value: Value): value is Value & { message?: string } {
-	return value !== null && Object(value) === value && "message" in Object(value);
-}
+const nativeTauriClient = createNativeTauriClient();
 
 export function createTauriClient(): TauriClient {
+	if (isBrowserRuntime()) return createBrowserTauriClient();
 	if (shouldUseBrowserDevMocks()) return createDevMockTauriClient();
-
 	return {
-		invoke: async <T, Args extends object = object>(
+		createChannel: <T>(onMessage: (message: T) => void) => {
+			const activeClient = isDesktopRemoteSelected()
+				? getDesktopRemoteTauriClient()
+				: nativeTauriClient;
+			return activeClient.createChannel?.(onMessage) ?? new Channel(onMessage);
+		},
+		invoke: <T, Args extends object = object>(
 			cmd: string,
 			args?: Args,
 			options?: InvokeOptions,
-		): Promise<T> => {
-			const started = performance.now();
-			diagnosticLog("tauri.invoke.start", {
-				cmd,
-				args: args ? Object.keys(args).join(",") : "",
-			});
-			try {
-				// SAFETY: typed wrappers pass Tauri-serializable command objects; Tauri validates IPC encoding.
-				const result = await invoke<T>(cmd, args as InvokeArgs | undefined, options);
-				markProfileIpc(cmd, started, true);
-				if (cmd === "get_kubeconfig_sources") markStartup("kubeconfig-ready");
-				diagnosticLog("tauri.invoke.done", {
-					cmd,
-					ms: Math.round(performance.now() - started),
-					result: diagnosticResultSummary(result),
-				});
-				return result;
-			} catch (error) {
-				markProfileIpc(cmd, started, false);
-				diagnosticLog("tauri.invoke.error", {
-					cmd,
-					ms: Math.round(performance.now() - started),
-					error: errorMessage(error),
-				});
-				console.error(`[k8s-manager:tauri] ${cmd} error`, error);
-				throw error;
-			}
+		) => {
+			const activeClient = isDesktopRemoteSelected()
+				? getDesktopRemoteTauriClient()
+				: nativeTauriClient;
+			return activeClient.invoke<T, Args>(cmd, args, options);
 		},
 	};
 }
@@ -334,8 +311,8 @@ export async function listResourceScope(
 	requests: ResourceListRequest[],
 	kubeconfigEnvVar?: string,
 	cancellable?: CancellableRequest,
-): Promise<ResourceSummary[]> {
-	return client.invoke<ResourceSummary[]>("list_resource_scope", {
+): Promise<ResourceScopeResult> {
+	return client.invoke<ResourceScopeResult>("list_resource_scope", {
 		clusterContext,
 		requests,
 		...kubeconfigArg(kubeconfigEnvVar),

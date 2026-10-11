@@ -23,7 +23,9 @@ pub mod commands;
 #[cfg(feature = "e2e")]
 mod e2e;
 pub mod models;
+pub mod runtime;
 
+#[cfg(feature = "desktop")]
 use commands::{
     add_kubeconfig_paths, apply_yaml, cancel_backend_requests, cancel_workspace_requests,
     clear_backend_diagnostics, connect_argo_server, delete_resource, detect_argocd, detect_flux,
@@ -40,19 +42,22 @@ use commands::{
     list_resource_events, list_resource_kinds, list_resource_metrics, list_resource_scope,
     list_resource_topology, list_resources, pick_kubeconfig_paths, pick_workspace_import_json,
     preflight_argo_operation, prepare_yaml_apply, preview_delete_resource, preview_rollout_restart,
-    preview_scale_workload, refresh_resource_cache, remove_kubeconfig_path,
-    reorder_kubeconfig_paths, resize_pod_exec_terminal, reveal_secret_data_value,
-    review_rbac_access, rollout_restart, run_argo_operation, save_workspace_export_json,
-    scale_workload, set_backend_diagnostics_enabled, set_kubeconfig_env_var,
-    set_show_kubeconfig_source_labels, start_aggregated_log_stream, start_pod_exec_session,
-    start_pod_log_stream, start_pod_port_forward, start_resource_event_watch, start_resource_watch,
-    stop_live_sessions_outside_scope, stop_pod_exec_session, stop_port_forward, stop_stream,
-    write_pod_exec_stdin, AppUsageMonitor, ArgoConnectionStore, BackendCancellationRegistry,
-    ClusterLiveStore, PodExecRegistry, PortForwardRegistry, StreamRegistry,
+    preview_scale_workload, refresh_resource_cache, remote_connect, remote_connection_status,
+    remote_disconnect, remote_invoke, remote_subscribe_channel, remote_unsubscribe_channel,
+    remove_kubeconfig_path, reorder_kubeconfig_paths, resize_pod_exec_terminal,
+    reveal_secret_data_value, review_rbac_access, rollout_restart, run_argo_operation,
+    save_workspace_export_json, scale_workload, set_backend_diagnostics_enabled,
+    set_kubeconfig_env_var, set_show_kubeconfig_source_labels, start_aggregated_log_stream,
+    start_pod_exec_session, start_pod_log_stream, start_pod_port_forward,
+    start_resource_event_watch, start_resource_watch, stop_live_sessions_outside_scope,
+    stop_pod_exec_session, stop_port_forward, stop_stream, write_pod_exec_stdin, AppUsageMonitor,
+    ArgoConnectionStore, BackendCancellationRegistry, ClusterLiveStore, PodExecRegistry,
+    PortForwardRegistry, RemoteConnectionStore, StreamRegistry,
 };
-#[cfg(not(feature = "e2e"))]
+#[cfg(all(feature = "desktop", not(feature = "e2e")))]
 use tauri::Manager;
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(feature = "e2e")]
@@ -108,6 +113,7 @@ pub fn run() {
         .manage(PodExecRegistry::default())
         .manage(AppUsageMonitor::default())
         .manage(ArgoConnectionStore::default())
+        .manage(RemoteConnectionStore::default())
         .invoke_handler(tauri::generate_handler![
             list_kube_contexts,
             list_namespaces,
@@ -188,7 +194,13 @@ pub fn run() {
             get_backend_cache_diagnostics,
             clear_backend_diagnostics,
             cancel_backend_requests,
-            cancel_workspace_requests
+            cancel_workspace_requests,
+            remote_connect,
+            remote_disconnect,
+            remote_connection_status,
+            remote_invoke,
+            remote_subscribe_channel,
+            remote_unsubscribe_channel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

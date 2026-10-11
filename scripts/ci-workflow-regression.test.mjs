@@ -159,7 +159,7 @@ test("change gate has no checkout; docs install no application dependencies", ()
 });
 
 function gate(overrides = {}) {
-  const env = { ...process.env, CHANGES_RESULT: "success", RELEASE_PR: "false" };
+  const env = { ...process.env, CHANGES_RESULT: "success", RELEASE_PR: "false", SERVER_RESULT: "success" };
   for (const key of domains) { env[`${key.toUpperCase()}_REQUIRED`] = "true"; env[`${key.toUpperCase()}_RESULT`] = "success"; }
   return spawnSync("bash", ["-e", "-o", "pipefail", "-c", block(job("check"), "run", 8)], {
     env: { ...env, ...overrides }, encoding: "utf8", timeout: 2000,
@@ -181,7 +181,7 @@ for (const domain of domains) {
   });
 }
 test("existing release PR exception still requires Nix success", () => {
-  const release = { RELEASE_PR: "true", DOCS_RESULT: "skipped", FRONTEND_RESULT: "skipped", RUST_RESULT: "skipped" };
+  const release = { RELEASE_PR: "true", DOCS_RESULT: "skipped", FRONTEND_RESULT: "skipped", RUST_RESULT: "skipped", SERVER_RESULT: "skipped" };
   assert.equal(gate(release), 0);
   for (const result of ["failure", "cancelled", "skipped"]) assert.notEqual(gate({ ...release, NIX_RESULT: result }), 0);
   assert.notEqual(gate({ ...release, FRONTEND_RESULT: "success" }), 0);
@@ -191,6 +191,12 @@ test("existing release PR exception still requires Nix success", () => {
     assert.ok(job(name).includes("!startsWith(github.head_ref, 'release/app-v')"));
     assert.ok(job(name).includes("!contains(github.event.pull_request.labels.*.name, 'release')"));
   }
+});
+test("headless checks run without GUI packages and the gate requires their success", () => {
+  assert.doesNotMatch(job("server"), /apt-get|cache-apt-pkgs|pkg-config/);
+  assert.match(job("server"), /cargo test --manifest-path src-tauri\/server\/Cargo.toml --locked/);
+  for (const result of ["failure", "cancelled", "skipped", ""]) assert.notEqual(gate({ SERVER_RESULT: result }), 0);
+  assert.equal(gate({ FRONTEND_REQUIRED: "false", FRONTEND_RESULT: "skipped", RUST_REQUIRED: "false", RUST_RESULT: "skipped", SERVER_RESULT: "skipped" }), 0);
 });
 test("whitespace check rejects bad diffs even without an available base", () => {
   const root = mkdtempSync(join(tmpdir(), "kubecove-ci-whitespace-"));

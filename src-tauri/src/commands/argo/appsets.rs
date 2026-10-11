@@ -84,7 +84,7 @@ fn application_set_summary_from_object(
 }
 
 /// List Argo CD `ApplicationSets` in the cluster.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_argocd_appsets(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,
@@ -107,7 +107,7 @@ pub async fn list_argocd_appsets(
 }
 
 /// Get detailed Argo CD `ApplicationSet` information including YAML and metadata.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_argocd_appset_details(
     cluster_context: String,
     name: String,

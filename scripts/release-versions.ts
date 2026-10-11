@@ -35,11 +35,17 @@ export function readWorkspaceReleaseVersions(root = "."): ReleaseVersions {
 		join(root, "src-tauri", "Cargo.toml"),
 		"utf8",
 	);
+	const cargoVersion = parseCargoPackageVersion(cargoToml, "src-tauri/Cargo.toml");
+	const serverPath = join(root, "src-tauri", "server", "Cargo.toml");
+	if (existsSync(serverPath)) {
+		const serverVersion = parseCargoPackageVersion(readFileSync(serverPath, "utf8"), "src-tauri/server/Cargo.toml");
+		if (serverVersion !== cargoVersion) throw new Error("Desktop and server package versions must match.");
+	}
 
 	return {
 		packageVersion: requireVersion("package.json", packageJson.version),
 		tauriVersion: requireVersion("src-tauri/tauri.conf.json", tauriConfig.version),
-		cargoVersion: parseCargoPackageVersion(cargoToml, "src-tauri/Cargo.toml"),
+		cargoVersion,
 	};
 }
 
@@ -182,6 +188,15 @@ export function updateWorkspaceReleaseVersions(
 			replaceCargoLockPackageVersion(cargoLock, targetVersion),
 		);
 	}
+	const serverPath = join(root, "src-tauri", "server", "Cargo.toml");
+	if (existsSync(serverPath)) {
+		writeFileSync(serverPath, replaceCargoPackageVersion(readFileSync(serverPath, "utf8"), targetVersion, serverPath));
+		const serverLockPath = join(root, "src-tauri", "server", "Cargo.lock");
+		if (existsSync(serverLockPath)) {
+			const serverLock = replaceCargoLockPackageVersion(readFileSync(serverLockPath, "utf8"), targetVersion, "kubecove", serverLockPath);
+			writeFileSync(serverLockPath, replaceCargoLockPackageVersion(serverLock, targetVersion, "kubecove-server", serverLockPath));
+		}
+	}
 
 	return {
 		packageVersion: targetVersion,
@@ -225,8 +240,10 @@ function replaceCargoPackageVersion(
 function replaceCargoLockPackageVersion(
 	contents: string,
 	version: string,
+	packageName = "kubecove",
+	source = "src-tauri/Cargo.lock",
 ): string {
-	const packageHeader = 'name = "kubecove"';
+	const packageHeader = `name = "${packageName}"`;
 	const lines = contents.split(/(\r?\n)/);
 
 	for (let index = 0; index < lines.length; index += 2) {
@@ -247,7 +264,7 @@ function replaceCargoLockPackageVersion(
 	}
 
 	throw new Error(
-		'src-tauri/Cargo.lock is missing [[package]] entry with name = "kubecove".',
+		`${source} is missing [[package]] entry with name = "${packageName}".`,
 	);
 }
 

@@ -1,5 +1,6 @@
 use crate::models::AppErrorKind;
 use crate::models::{AppError, PodExecSessionSummary, PodExecTerminalSize};
+use crate::runtime::JoinHandle;
 use chrono::Utc;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -8,7 +9,6 @@ use std::{
         Arc, Mutex,
     },
 };
-use tauri::async_runtime::JoinHandle;
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 
 use super::validation::ValidatedPodExecRequest;
@@ -46,6 +46,11 @@ pub struct PodExecRegistry {
 }
 
 impl PodExecRegistry {
+    /// Stop all exec sessions when their host owner ends.
+    pub fn stop_all(&self) {
+        self.stop_outside_scope(&HashSet::new(), "");
+    }
+
     pub(super) fn session_id(&self) -> String {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         format!("pod-exec-{id}")

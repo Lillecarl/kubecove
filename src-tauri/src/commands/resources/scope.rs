@@ -5,18 +5,21 @@ use crate::commands::helpers::{
     filter_flux_ownership_index,
 };
 use crate::models::AppErrorKind;
+use crate::runtime::State;
 use crate::{
     commands::{
         diagnostic_field,
         kubeconfig::{kubeconfig_source_key, KubeconfigSource},
         BackendCancellationRegistry, ClusterLiveStore,
     },
-    models::{AppError, DiscoveredResourceKind, ResourceListRequest, ResourceSummary},
+    models::{
+        AppError, DiscoveredResourceKind, ResourceListRequest, ResourceScopeFailure,
+        ResourceScopeResult, ResourceSummary,
+    },
 };
 use futures_util::future::join_all;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
-use tauri::State;
 
 #[derive(Debug, Clone)]
 enum ResourceScopeKind {
@@ -132,8 +135,23 @@ pub async fn resource_scope_from(
     live_store: ClusterLiveStore,
     kubeconfig_env_var: Option<String>,
 ) -> Result<Vec<ResourceSummary>, AppError> {
+    let result =
+        resource_scope_result_from(cluster_context, requests, live_store, kubeconfig_env_var)
+            .await?;
+    if let Some(failure) = result.failures.into_iter().next() {
+        return Err(failure.error);
+    }
+    Ok(result.resources)
+}
+
+async fn resource_scope_result_from(
+    cluster_context: String,
+    requests: Vec<ResourceListRequest>,
+    live_store: ClusterLiveStore,
+    kubeconfig_env_var: Option<String>,
+) -> Result<ResourceScopeResult, AppError> {
     if requests.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ResourceScopeResult::default());
     }
     let groups = group_requests(requests)?;
     let requested_namespaces = ownership_namespaces(&groups);
@@ -151,7 +169,18 @@ pub async fn resource_scope_from(
                 let source_key = source_key.clone();
                 let kubeconfig_env_var = kubeconfig_env_var.clone();
                 async move {
-                    match kind {
+                    let request = ResourceListRequest {
+                        kind: match &kind {
+                            ResourceScopeKind::Typed(kind) => Some(kind.clone()),
+                            ResourceScopeKind::Dynamic(_) => None,
+                        },
+                        resource_kind: match &kind {
+                            ResourceScopeKind::Dynamic(kind) => Some(kind.clone()),
+                            ResourceScopeKind::Typed(_) => None,
+                        },
+                        namespace: namespace.clone(),
+                    };
+                    let result = match kind {
                         ResourceScopeKind::Typed(kind) => {
                             live_store
                                 .typed_resources(
@@ -196,21 +225,38 @@ pub async fn resource_scope_from(
                                 )
                                 .await
                         }
-                    }
+                    };
+                    (request, result)
                 }
             });
-            let mut rows = Vec::new();
-            for result in join_all(fetches).await {
-                rows.extend(result?);
+            let mut result = ResourceScopeResult::default();
+            for (request, fetched) in join_all(fetches).await {
+                match fetched {
+                    Ok(rows) => {
+                        result.resources.extend(rows);
+                        result.completed_requests.push(request);
+                    }
+                    Err(error) if error.kind == AppErrorKind::Forbidden => {
+                        result.failures.push(ResourceScopeFailure {
+                            cluster_context: cluster_context.clone(),
+                            request,
+                            error,
+                        });
+                    }
+                    Err(error) => return Err(error),
+                }
             }
-            Ok::<_, AppError>(rows)
+            Ok::<_, AppError>(result)
         }
     });
 
     let results = join_all(futures).await;
-    let mut rows = Vec::new();
+    let mut scope = ResourceScopeResult::default();
     for result in results {
-        rows.extend(result?);
+        let result = result?;
+        scope.resources.extend(result.resources);
+        scope.completed_requests.extend(result.completed_requests);
+        scope.failures.extend(result.failures);
     }
     let client = KubeconfigSource::new(kubeconfig_env_var)?
         .client_for_context(&cluster_context)
@@ -222,11 +268,12 @@ pub async fn resource_scope_from(
         })
         .await?;
     let index = filter_flux_ownership_index(index, &requested_namespaces);
-    enrich_resource_summaries_with_flux_inventory(&mut rows, &index);
-    Ok(dedupe_rows(rows))
+    enrich_resource_summaries_with_flux_inventory(&mut scope.resources, &index);
+    scope.resources = dedupe_rows(scope.resources);
+    Ok(scope)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_resource_scope(
     cluster_context: String,
     requests: Vec<ResourceListRequest>,
@@ -235,7 +282,7 @@ pub async fn list_resource_scope(
     cancel_scope: Option<String>,
     live_store: State<'_, ClusterLiveStore>,
     cancellations: State<'_, BackendCancellationRegistry>,
-) -> Result<Vec<ResourceSummary>, AppError> {
+) -> Result<ResourceScopeResult, AppError> {
     let started = Instant::now();
     let request_count = requests.len();
     let namespace_count = requests
@@ -251,7 +298,7 @@ pub async fn list_resource_scope(
         .execute(
             cancel_scope,
             request_id,
-            resource_scope_from(
+            resource_scope_result_from(
                 cluster_context.clone(),
                 requests,
                 live_store.inner().clone(),
@@ -264,7 +311,7 @@ pub async fn list_resource_scope(
             eprintln!(
                 "[kubecove:backend] list_resource_scope done context={} rows={} ms={}",
                 cluster_context,
-                rows.len(),
+                rows.resources.len(),
                 started.elapsed().as_millis()
             );
         }
@@ -289,7 +336,8 @@ pub async fn list_resource_scope(
         vec![
             diagnostic_field("requests", request_count),
             diagnostic_field("namespaces", namespace_count),
-            diagnostic_field("rows", rows.len()),
+            diagnostic_field("rows", rows.resources.len()),
+            diagnostic_field("deniedRequests", rows.failures.len()),
         ]
     });
     result

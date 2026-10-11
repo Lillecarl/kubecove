@@ -54,6 +54,7 @@
 		pickWorkspaceImportJson,
 		saveWorkspaceExportJson,
 	} from "@/lib/tauri";
+	import { isBrowserRuntime } from "@/lib/tauri-runtime";
 	import { queryKeys } from "@/lib/queryKeys";
 	import { kubeconfigSourcesQueryOptions } from "@/lib/kubeconfig-sources-query";
 	import type { ClusterContext, NamespaceSummary } from "@/lib/types";
@@ -97,6 +98,8 @@
 	];
 
 	const client = createTauriClient();
+	const browserRuntime = isBrowserRuntime();
+	let importFileInput = $state<HTMLInputElement | null>(null);
 	const sourceQuery = createQuery(() => kubeconfigSourcesQueryOptions(client));
 	const sourceReady = $derived(sourceQuery.isSuccess || sourceQuery.isError);
 	const kubeconfigSourceKey = $derived(sourceQuery.data?.sourceKey);
@@ -217,11 +220,24 @@
 		workspaceTransferError = "";
 		workspaceTransferMessage = "";
 		try {
-			const saved = await saveWorkspaceExportJson(
-				client,
-				workspaceFileName(workspaces),
-				serializeWorkspaceExport(workspaces),
-			);
+			const fileName = workspaceFileName(workspaces);
+			const content = serializeWorkspaceExport(workspaces);
+			let saved: boolean;
+			if (browserRuntime) {
+				const url = URL.createObjectURL(
+					new Blob([content], { type: "application/json" }),
+				);
+				const link = document.createElement("a");
+				link.href = url;
+				link.download = fileName;
+				document.body.append(link);
+				link.click();
+				link.remove();
+				window.setTimeout(() => URL.revokeObjectURL(url), 0);
+				saved = true;
+			} else {
+				saved = await saveWorkspaceExportJson(client, fileName, content);
+			}
 			workspaceTransferMessage = saved
 				? `Exported ${workspaces.length === 1 ? workspaces[0].name : `${workspaces.length} workspaces`}.`
 				: "Export canceled.";
@@ -239,12 +255,41 @@
 				workspaceTransferMessage = "Import canceled.";
 				return;
 			}
-			const preview = buildWorkspaceImportPreview(raw, $workspaces);
-			importPreview = preview;
-			importActions = Object.fromEntries(
-				preview.items.map((item) => [item.id, item.defaultAction]),
-			);
-			workspaceTransferMessage = `Loaded ${preview.items.length} workspace ${preview.items.length === 1 ? "item" : "items"}.`;
+			showImportPreview(raw);
+		} catch (error) {
+			workspaceTransferError = errorText(error);
+		}
+	}
+
+	function showImportPreview(raw: string) {
+		const preview = buildWorkspaceImportPreview(raw, $workspaces);
+		importPreview = preview;
+		importActions = Object.fromEntries(
+			preview.items.map((item) => [item.id, item.defaultAction]),
+		);
+		workspaceTransferMessage = `Loaded ${preview.items.length} workspace ${preview.items.length === 1 ? "item" : "items"}.`;
+	}
+
+	function openBrowserImportPicker() {
+		workspaceTransferError = "";
+		workspaceTransferMessage = "";
+		importFileInput?.click();
+	}
+
+	async function readBrowserImportFile(event: Event) {
+		const input = event.currentTarget;
+		if (!(input instanceof HTMLInputElement)) return;
+		const file = input.files?.[0];
+		input.value = "";
+		if (!file) return;
+		workspaceTransferError = "";
+		workspaceTransferMessage = "";
+		if (file.size > 2 * 1024 * 1024) {
+			workspaceTransferError = "Workspace import files must be 2 MiB or smaller.";
+			return;
+		}
+		try {
+			showImportPreview(await file.text());
 		} catch (error) {
 			workspaceTransferError = errorText(error);
 		}
@@ -340,9 +385,23 @@
 					</span>
 				</div>
 				<div class="flex flex-wrap justify-end gap-2" role="group" aria-label="Workspace sharing">
-					<Button type="button" variant="outline" size="sm" onclick={importWorkspaces}>
-						<Upload data-icon="inline-start" /> Import
-					</Button>
+					{#if browserRuntime}
+						<input
+							bind:this={importFileInput}
+							type="file"
+							accept=".json,application/json"
+							class="sr-only"
+							aria-label="Choose workspace JSON file"
+							onchange={readBrowserImportFile}
+						/>
+						<Button type="button" variant="outline" size="sm" onclick={openBrowserImportPicker}>
+							<Upload data-icon="inline-start" /> Import
+						</Button>
+					{:else}
+						<Button type="button" variant="outline" size="sm" onclick={importWorkspaces}>
+							<Upload data-icon="inline-start" /> Import
+						</Button>
+					{/if}
 					<Button
 						type="button"
 						variant="outline"

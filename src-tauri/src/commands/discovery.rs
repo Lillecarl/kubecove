@@ -1,4 +1,5 @@
 use crate::models::AppErrorKind;
+use crate::runtime::State;
 use crate::{
     commands::helpers::list_params,
     commands::{
@@ -17,7 +18,6 @@ use kube::{
     Client,
 };
 use std::time::Instant;
-use tauri::State;
 
 const MAX_PRESENT_KIND_CONCURRENCY: usize = 48;
 
@@ -101,7 +101,7 @@ pub(crate) fn sort_and_dedup_kinds(kinds: &mut Vec<DiscoveredResourceKind>) {
     });
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_resource_kinds(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,
@@ -241,7 +241,7 @@ async fn custom_resource_kind_present(
     Ok(false)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_present_custom_resource_kinds(
     cluster_context: String,
     namespaces: Vec<String>,

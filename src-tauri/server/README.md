@@ -1,0 +1,65 @@
+# Headless server
+
+This crate builds the existing backend with its `desktop` feature disabled. It owns network authentication, session ownership, HTTP command dispatch, WebSocket channels, and bundled frontend serving. Kubernetes logic stays in the parent crate.
+
+The transport and lifecycle rules are defined by [ADR 0020](../../docs/decisions/0020-headless-server-mode.md).
+
+Build from the repository root. The web build must precede Cargo because the server embeds `dist`.
+
+```sh
+bun install --frozen-lockfile
+KUBECOVE_PUBLIC_RUNTIME=web bun --bun vite build
+cargo build --locked --release --manifest-path src-tauri/server/Cargo.toml
+src-tauri/server/target/release/kubecove-server --listen 127.0.0.1:8080
+```
+
+The server reads Kubernetes configuration on its own host. It uses exactly one authentication mode: a per-start token (default), Cloudflare Access, or OIDC. Browsers support all three; the native desktop remote client supports token mode only. In token mode, startup prints a login URL containing a fresh token. Open that URL in a browser, or enter the token in the connection screen. The browser removes the token fragment after loading. The token also lives in the server data directory as `server-token`, with Unix mode `0600`. Treat startup output as a credential.
+
+For SSH forwarding, keep the server on loopback. This example uses the same port on both machines.
+
+```sh
+ssh -N -L 8080:127.0.0.1:8080 user@server
+```
+
+Open `http://127.0.0.1:8080` locally. If the local port differs, start the server with `--public-origin http://127.0.0.1:<local-port>` so Host, Origin and WebSocket CSP checks accept that exact origin.
+
+The default listener is `127.0.0.1:0`, which chooses an available port. Non-loopback TCP requires `--allow-remote`, `--tls-cert` and `--tls-key`. `--socket` accepts a Unix socket path and requires `--public-origin` for its forwarded browser origin. Run `kubecove-server --help` for the remaining options.
+
+One client owns the server session at a time. Reconnects retain that owner during `--session-grace`, which defaults to `5m`. Takeover stops the previous owner's streams, exec sessions and laptop tunnels. Server-loopback forwards transfer to the new owner. Explicit disconnect or grace expiry closes the remaining live sessions. Browser forwards bind on the server host, so they require separate forwarding to reach them from a laptop.
+
+The server uses native credential storage when available. Unix hosts without it use the encrypted file store approved in [ADR 0021](../../docs/decisions/0021-file-credential-store-without-keyring.md). Desktop remote-client integration and release packaging are tracked in [verification.md](verification.md).
+
+Local transport verification uses an isolated Kubernetes WebSocket echo fixture. It creates no cluster resources.
+
+```sh
+cargo test --locked --manifest-path src-tauri/server/Cargo.toml
+cargo clippy --locked --manifest-path src-tauri/server/Cargo.toml --all-targets -- -D warnings
+cargo build --locked --manifest-path src-tauri/server/Cargo.toml
+bun e2e/headless-smoke.ts
+```
+
+The smoke report is written to `e2e/artifacts/headless/report.json`.
+
+To also exercise the actual Rust desktop remote client against that same isolated
+fixture without a display, run `KUBECOVE_NATIVE_REMOTE_PROBE=1 bun e2e/headless-smoke.ts`.
+This builds the desktop test target and requires its native build dependencies.
+It checks laptop listener binding, duplex bytes, upload EOF and tunnel cleanup.
+
+## OpenID Connect
+
+OIDC browser authentication follows [ADR 0022](../../docs/decisions/0022-oidc-server-sign-in.md).
+Configure `--oidc-issuer`, `--oidc-client-id`, `--oidc-login-timeout`, native TLS and
+an exact HTTPS `--public-origin`. Confidential clients additionally mount a private
+`--oidc-client-secret-file`. The issuer application must register
+`<public-origin>/api/v1/oidc/callback` and restrict permitted users. See the
+[operator instructions](../../docs/wiki/Remote-Server.md#sign-in-through-openid-connect).
+
+OIDC is mutually exclusive with Cloudflare Access. It generates no startup token.
+It authenticates KubeCove users only; Kubernetes continues to use the server's
+credentials, shared by every permitted user, with one active owner. Browser logout
+revokes the cookie and closes the matching owner. Native desktop remote connections
+require token mode. The [deployment guide](../../deploy/README.md#openid-connect-with-authentik)
+has an Authentik example behind Cloudflare Tunnel.
+
+No release has published server archives or a container image yet. Build from source
+as above, or build the image described in [deploy/README.md](../../deploy/README.md).

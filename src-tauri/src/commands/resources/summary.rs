@@ -9,8 +9,8 @@ use crate::commands::{
 };
 use crate::models::AppErrorKind;
 use crate::models::{AppError, ResourceSummary};
+use crate::runtime::State;
 use std::time::Instant;
-use tauri::State;
 
 pub async fn resources_summary_from(
     cluster_context: String,
@@ -60,7 +60,7 @@ pub(super) async fn resource_summaries_with_client(
     ))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_resources(
     cluster_context: String,
     kind: String,

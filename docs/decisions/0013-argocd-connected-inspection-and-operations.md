@@ -31,3 +31,7 @@ Manual external HTTPS URLs work first. Discovered eligible cluster Services can 
 Connected sync/retry payloads use Argo CD server request shapes: `syncOptions` is protobuf `StringArray` (`{ "items": [...] }`) and sync resource selectors omit `version`. Retry resolves recorded sync state during review, stores transformed immutable request in the single-use session, and confirms that review before execution. Resource action discovery uses `resourceName` and server-returned `actions`; execution uses flat `ApplicationResourceActionRunRequestV2` fields.
 
 Connected reads and operations require exact profile `clusterContext` and `workspaceId` binding. Unknown transport values are rejected.
+
+## Amendment 2026-10-09: server mode without a keyring
+
+[ADR 0021](0021-file-credential-store-without-keyring.md) allows `kubecove-server` to keep remembered credentials and operation review sessions in an encrypted file store when native credential storage is unavailable. The desktop app keeps this ADR's rule: no fallback.

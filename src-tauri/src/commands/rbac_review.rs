@@ -1,4 +1,5 @@
 use crate::models::AppErrorKind;
+use crate::runtime::State;
 use crate::{
     commands::{
         diagnostic_field, diagnostics::record_backend_result, kubeconfig::KubeconfigSource,
@@ -14,9 +15,8 @@ use k8s_openapi::api::authorization::v1::{
 };
 use kube::api::{Api, PostParams};
 use std::time::Instant;
-use tauri::State;
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn review_rbac_access(
     request: RbacAccessReviewRequest,
     request_id: Option<String>,

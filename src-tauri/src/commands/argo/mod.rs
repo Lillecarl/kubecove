@@ -3,6 +3,7 @@ mod appprojects;
 mod appsets;
 mod comparison;
 mod connected;
+mod credential_store;
 mod operations;
 mod scope;
 mod session;
@@ -19,10 +20,15 @@ pub use connected::{
     connect_argo_server, disconnect_argo_server, discover_argo_servers, forget_argo_credential,
     get_argo_application_inspector, get_argo_connection_status, ArgoConnectionStore,
 };
+#[cfg(not(feature = "desktop"))]
+pub use credential_store::{
+    active_credential_store_description, initialize_server_credential_store,
+    CredentialStoreDescription,
+};
 pub use operations::{preflight_argo_operation, run_argo_operation};
 
 /// Detect if Argo CD CRDs are present in the cluster.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn detect_argocd(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,

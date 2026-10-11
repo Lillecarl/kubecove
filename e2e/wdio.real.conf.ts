@@ -18,7 +18,7 @@ export const config: E2eConfig = {
 	logLevel: profiling ? "silent" : "warn",
 	specs: profiling ? (process.env.KUBECOVE_MEMORY_FIXTURE ? ["./specs/profile/memory.e2e.ts"] : ["./specs/profile/**/*.e2e.ts"]) : process.env.KUBECOVE_E2E_SMOKE
 		? ["./specs/desktop/**/*.e2e.ts"]
-		: ["./specs/real/**/*.e2e.ts"],
+		: ["./specs/real/**/*.e2e.ts", "./specs/desktop/remote.e2e.ts"],
 	maxInstances: 1,
 	framework: "mocha",
 	reporters: profiling ? [] : [["spec", artifacts ? { outputDir: artifacts } : {}]],

@@ -23,6 +23,8 @@
 	import {
 		DEFAULT_KUBECONFIG_ENV_VAR,
 	} from "@/lib/settings";
+	import { isBrowserRuntime } from "@/lib/tauri-runtime";
+	import { desktopRemoteConnection } from "@/lib/remote-runtime";
 	import {
 		addKubeconfigPaths,
 		createTauriClient,
@@ -38,6 +40,7 @@
 	import { KUBECONFIG_SOURCES_QUERY_KEY, kubeconfigSourcesQueryOptions } from "@/lib/kubeconfig-sources-query";
 
 	const client = createTauriClient();
+	const remoteFilesystem = $derived(isBrowserRuntime() || $desktopRemoteConnection !== null);
 	const queryClient = useQueryClient();
 	let envDraft = $state(getSettingsSnapshot().kubeconfigEnvVar);
 	let pathDraft = $state("");
@@ -62,7 +65,9 @@
 
 	function sourceDescription(): string {
 		if (!sources) return "Loading kubeconfig sources.";
-		return `${sources.sourceLabel}. Full file paths are shown only here.`;
+		return remoteFilesystem
+			? `${sources.sourceLabel}. Paths refer to files on the KubeCove server.`
+			: `${sources.sourceLabel}. Full file paths are shown only here.`;
 	}
 
 	function applySources(next: KubeconfigSourcesSummary) {
@@ -75,12 +80,14 @@
 	async function runSourceUpdate(
 		action: () => Promise<KubeconfigSourcesSummary>,
 		busy = true,
-	) {
+	): Promise<boolean> {
 		if (busy) sourceActionBusy = true;
 		try {
 			applySources(await action());
+			return true;
 		} catch (error) {
 			sourceActionError = error;
+			return false;
 		} finally {
 			if (busy) sourceActionBusy = false;
 		}
@@ -100,8 +107,8 @@
 
 	function addPastedPaths() {
 		if (!pathDraft.trim()) return;
-		void runSourceUpdate(() => addKubeconfigPaths(client, [pathDraft])).then(() => {
-			pathDraft = "";
+		void runSourceUpdate(() => addKubeconfigPaths(client, [pathDraft])).then((saved) => {
+			if (saved) pathDraft = "";
 		});
 	}
 
@@ -194,19 +201,23 @@
 			<div class="min-w-0 space-y-1">
 				<div class="text-sm font-medium">Added kubeconfig paths</div>
 				<p class="text-xs text-muted-foreground">
-					Extra kubeconfig files KubeCove reads beside environment variable.
+					{remoteFilesystem
+						? "Extra kubeconfig files read from the server filesystem."
+						: "Extra kubeconfig files KubeCove reads beside environment variable."}
 				</p>
 			</div>
-			<Button
-				type="button"
-				variant="outline"
-				size="sm"
-				disabled={sourceBusy}
-				onclick={() => void runSourceUpdate(() => pickKubeconfigPaths(client))}
-			>
-				<FilePlus data-icon="inline-start" />
-				Choose files
-			</Button>
+			{#if !remoteFilesystem}
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={sourceBusy}
+					onclick={() => void runSourceUpdate(() => pickKubeconfigPaths(client))}
+				>
+					<FilePlus data-icon="inline-start" />
+					Choose files
+				</Button>
+			{/if}
 		</div>
 
 		<div class="mt-3 flex flex-col gap-2">
@@ -258,24 +269,45 @@
 				</div>
 			{/if}
 
-			<Textarea
-				bind:value={pathDraft}
-				placeholder="/path/to/kubeconfig.yaml"
-				aria-label="Paste kubeconfig paths"
-				rows={3}
-			/>
-			<div class="flex justify-end">
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					disabled={sourceBusy || !pathDraft.trim()}
-					onclick={addPastedPaths}
-				>
-					<Plus data-icon="inline-start" />
-					Add pasted paths
-				</Button>
-			</div>
+			{#if remoteFilesystem}
+				<div class="flex flex-wrap gap-2">
+					<Input
+						bind:value={pathDraft}
+						placeholder="/path/on/server/kubeconfig.yaml"
+						aria-label="Kubeconfig path on server"
+						disabled={sourceBusy}
+					/>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={sourceBusy || !pathDraft.trim()}
+						onclick={addPastedPaths}
+					>
+						<Plus data-icon="inline-start" />
+						Add server path
+					</Button>
+				</div>
+			{:else}
+				<Textarea
+					bind:value={pathDraft}
+					placeholder="/path/to/kubeconfig.yaml"
+					aria-label="Paste kubeconfig paths"
+					rows={3}
+				/>
+				<div class="flex justify-end">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={sourceBusy || !pathDraft.trim()}
+						onclick={addPastedPaths}
+					>
+						<Plus data-icon="inline-start" />
+						Add pasted paths
+					</Button>
+				</div>
+			{/if}
 		</div>
 	</div>
 </FieldGroup>

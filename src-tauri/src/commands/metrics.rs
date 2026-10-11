@@ -8,6 +8,7 @@ use crate::models::{
     AppError, ResourceMetricSummary, ResourceMetricsAvailability,
     ResourceMetricsAvailabilityStatus, ResourceMetricsSummary,
 };
+use crate::runtime::State;
 use futures_util::{stream, StreamExt};
 use k8s_openapi::api::apps::v1::ReplicaSet;
 use k8s_openapi::api::core::v1::Pod;
@@ -19,7 +20,6 @@ use kube::{
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Instant;
-use tauri::State;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MetricsListStatus {
@@ -550,7 +550,7 @@ pub async fn resource_metrics_from(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_resource_metrics(
     cluster_context: String,
     namespaces: Vec<String>,

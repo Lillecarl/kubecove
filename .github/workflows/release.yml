@@ -107,6 +107,9 @@ jobs:
       - name: Check documentation
         run: bun run docs:check
 
+      - name: Test release orchestration
+        run: node --test scripts/release-workflow-regression.test.mjs
+
       - name: Typecheck frontend
         run: bun run typecheck
 
@@ -228,6 +231,126 @@ jobs:
             .artifacts/e2e/**
           if-no-files-found: ignore
 
+  server-build:
+    name: Build headless server ${{ matrix.target }}
+    needs:
+      - metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x64
+            platform: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - label: macOS x64
+            platform: macos-15-intel
+            target: x86_64-apple-darwin
+          - label: macOS arm64
+            platform: macos-latest
+            target: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache headless server Rust dependencies
+        uses: swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          shared-key: kubecove-server-release-${{ matrix.target }}
+          workspaces: "./src-tauri/server -> target"
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build embedded web assets
+        run: bun --bun vite build
+        env:
+          KUBECOVE_PUBLIC_RUNTIME: web
+
+      - name: Build headless server
+        run: cargo build --locked --release --manifest-path src-tauri/server/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Package server archive
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="${TAG_NAME#app-v}"
+          binary="src-tauri/server/target/${TARGET}/release/kubecove-server"
+          sidecar="kubeconform-${TARGET}"
+          archive="kubecove-server_${version}_${TARGET}.tar.gz"
+          test -x "$binary"
+          test -x "src-tauri/bin/$sidecar"
+          tar -czf "$archive" -C "$(dirname "$binary")" kubecove-server -C "${GITHUB_WORKSPACE}/src-tauri/bin" "$sidecar"
+
+      - name: Upload server archive for release assembly
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: kubecove-server-${{ matrix.target }}
+          path: kubecove-server_*.tar.gz
+          if-no-files-found: error
+
+  container-build:
+    name: Build container ${{ matrix.variant }}
+    needs:
+      - metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, slim]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Build and verify container
+        env:
+          VARIANT: ${{ matrix.variant }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          image="kubecove:release-${VARIANT}"
+          docker build --platform linux/amd64 --target "$VARIANT" --tag "$image" --build-arg "VERSION=${TAG_NAME#app-v}" --build-arg "REVISION=$GITHUB_SHA" .
+          sudo bash scripts/container-smoke.sh "$image" "$VARIANT" | tee "kubecove-container-${VARIANT}.txt"
+          docker save --output "kubecove-container-${VARIANT}.tar" "$image"
+      - name: Upload verified container
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: kubecove-container-${{ matrix.variant }}
+          path: |
+            kubecove-container-${{ matrix.variant }}.tar
+            kubecove-container-${{ matrix.variant }}.txt
+          if-no-files-found: error
+
   nix:
     name: Nix ${{ matrix.label }} release build
     strategy:
@@ -265,6 +388,8 @@ jobs:
       - frontend
       - rust
       - e2e
+      - server-build
+      - container-build
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -276,16 +401,22 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           RUST_RESULT: ${{ needs.rust.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          SERVER_BUILD_RESULT: ${{ needs.server-build.result }}
+          CONTAINER_BUILD_RESULT: ${{ needs.container-build.result }}
         run: |
           set -euo pipefail
           echo "Release metadata: ${METADATA_RESULT}"
           echo "Frontend release checks: ${FRONTEND_RESULT}"
           echo "Rust release checks: ${RUST_RESULT}"
           echo "Kubernetes E2E matrix: ${E2E_RESULT}"
+          echo "Headless server builds: ${SERVER_BUILD_RESULT}"
+          echo "Container builds: ${CONTAINER_BUILD_RESULT}"
           test "${METADATA_RESULT}" = "success"
           test "${FRONTEND_RESULT}" = "success"
           test "${RUST_RESULT}" = "success"
           test "${E2E_RESULT}" = "success"
+          test "${SERVER_BUILD_RESULT}" = "success"
+          test "${CONTAINER_BUILD_RESULT}" = "success"
 
   draft:
     name: Create draft release
@@ -450,6 +581,12 @@ jobs:
       - prepare
       - verify
       - build
+      - server-build
+      - container-build
+    permissions:
+      actions: read
+      contents: write
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -458,6 +595,20 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: 24
+
+      - name: Download headless server archives
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh run download "$RUN_ID" --repo "$GH_REPO" --dir server-assets
+
+      - name: Upload headless server release assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: gh release upload "$TAG_NAME" server-assets/kubecove-server-*/kubecove-server_*.tar.gz --clobber
 
       - name: Verify final updater platform coverage
         env:
@@ -488,6 +639,9 @@ jobs:
             `KubeCove_${version}_amd64.AppImage.sig`,
             `KubeCove_${version}_x64-setup.exe`,
             `KubeCove_${version}_x64-setup.exe.sig`,
+            `kubecove-server_${version}_x86_64-unknown-linux-gnu.tar.gz`,
+            `kubecove-server_${version}_x86_64-apple-darwin.tar.gz`,
+            `kubecove-server_${version}_aarch64-apple-darwin.tar.gz`,
             "latest.json",
           ];
           const requiredPlatforms = [
@@ -509,6 +663,27 @@ jobs:
             ].filter(Boolean).join("; "));
           }
           EOF
+
+      - name: Publish container images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GH_ACTOR: ${{ github.actor }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          registry_image="ghcr.io/${GH_REPO,,}"
+          version="${TAG_NAME#app-v}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GH_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          for variant in full slim; do
+            suffix=""
+            if [[ "$variant" == slim ]]; then suffix="-slim"; fi
+            docker load --input "server-assets/kubecove-container-${variant}/kubecove-container-${variant}.tar"
+            image="${registry_image}:${version}${suffix}"
+            docker tag "kubecove:release-${variant}" "$image"
+            docker push "$image"
+          done
 
       - name: Publish completed release
         if: needs.prepare.outputs.release-draft == 'true'

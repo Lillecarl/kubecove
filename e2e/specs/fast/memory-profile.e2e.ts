@@ -41,7 +41,8 @@ describe("browser heap observations", () => {
 							const root = ["resources", "resource-metrics", "resource-topology"].includes(first) ? first : "other";
 							const row = roots.get(root) || { root, objects: 0, arrayItems: 0, jsonBytes: 0 };
 							row.objects++;
-							if (Array.isArray(query.state.data)) row.arrayItems += query.state.data.length;
+							const items = root === "resources" ? query.state.data?.resources : query.state.data;
+							if (Array.isArray(items)) row.arrayItems += items.length;
 							if (query.state.data !== undefined) row.jsonBytes += new TextEncoder().encode(JSON.stringify(query.state.data)).byteLength;
 							roots.set(root, row);
 						}

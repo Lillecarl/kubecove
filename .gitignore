@@ -4,6 +4,7 @@ node_modules/
 # Tauri / Rust
 target/
 src-tauri/target/
+src-tauri/server/target/
 
 # Frontend build output
 dist/

@@ -8,8 +8,8 @@ use crate::commands::{
     diagnostic_field, kubeconfig::KubeconfigSource, BackendCancellationRegistry,
 };
 use crate::models::{AppError, ResourceDetailsFull, YamlEncoding, YamlViewMode};
+use crate::runtime::State;
 use std::time::Instant;
-use tauri::State;
 
 #[cfg(test)]
 mod tests {
@@ -145,7 +145,7 @@ pub(super) async fn resource_details_with_client(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_resource_details(
     cluster_context: String,
     kind: String,

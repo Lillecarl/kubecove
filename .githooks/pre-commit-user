@@ -36,6 +36,14 @@ if [ -n "$staged_files" ]; then
       e2e/lifecycle.ts)
         scan_content=$(printf '%s\n' "$scan_content" | grep -Ev '^[[:space:]]*(return \{ apiVersion: config\.apiVersion|const bytes = .*record\.kubeconfig|await writeFile\(join\(artifacts, "kubeconfig-summary\.json"|async function desktopSmoke\(\))' || true)
         ;;
+      deploy/kubernetes/kubecove.yaml)
+        # The example references projected credentials by path, never embeds them.
+        scan_content=$(printf '%s\n' "$scan_content" | grep -Ev '^    (clusters:|contexts:|users:|current-context: in-cluster)$' || true)
+        ;;
+      e2e/headless-smoke.ts|e2e/specs/desktop/remote.e2e.ts)
+        # Local echo fixtures have no credential fields; keep scanning their values.
+        scan_content=$(printf '%s\n' "$scan_content" | sed -E 's/^([[:space:]]*)(clusters|contexts|users):/\1/' )
+        ;;
     esac
 
     if printf '%s\n' "$scan_content" | grep -Eiq '(^|[[:space:]])(client-key-data|client-certificate-data|certificate-authority-data|current-context|clusters|contexts|users):'; then

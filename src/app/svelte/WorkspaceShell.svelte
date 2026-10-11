@@ -102,6 +102,7 @@
 	import { workspaceStore } from "@/features/workspaces/workspaceStore";
 	import AppSurfaces from "./AppSurfaces.svelte";
 	import ActiveLiveSessionsButton from "./ActiveLiveSessionsButton.svelte";
+	import RemoteHostScope from "@/features/remote-connection/RemoteHostScope.svelte";
 	import AppUsageFooter from "./AppUsageFooter.svelte";
 	import CommandPalette from "./CommandPalette.svelte";
 	import DetailPanelFrame from "./DetailPanelFrame.svelte";
@@ -705,6 +706,7 @@
 				{/if}
 			</nav>
 			<div class="flex min-w-0 shrink-0 items-center justify-end gap-1 [-webkit-app-region:no-drag] md:flex-1">
+				<RemoteHostScope />
 				<ActiveLiveSessionsButton onOpenManager={openPortForwards} />
 				<UpdateStatusButton />
 				<Button

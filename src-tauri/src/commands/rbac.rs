@@ -9,6 +9,7 @@ use crate::models::{
     RbacInspectionSummary, RbacNamespaceAccessSummary, RbacRequestMode, RbacRiskIndicator,
     RbacRiskLevel, RbacRoleSummary, RbacRuleSummary, RbacSubjectSummary, ServiceAccountSummary,
 };
+use crate::runtime::State;
 use chrono::{DateTime, Utc};
 use k8s_openapi::api::{
     core::v1::ServiceAccount,
@@ -17,7 +18,6 @@ use k8s_openapi::api::{
 use kube::Client;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
-use tauri::State;
 
 #[path = "rbac_risk.rs"]
 mod rbac_risk;
@@ -38,7 +38,7 @@ mod rbac_tests;
     clippy::large_futures,
     reason = "RBAC inspection intentionally loads five Kubernetes families concurrently"
 )]
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_rbac_inspection(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,

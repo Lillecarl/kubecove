@@ -7,7 +7,7 @@ use std::{
     net::{Ipv4Addr, SocketAddrV4},
 };
 use tokio::{
-    io::copy_bidirectional,
+    io::{copy_bidirectional, AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
     task::JoinSet,
 };
@@ -62,13 +62,16 @@ async fn verify_pod_port_forward(
     Ok(())
 }
 
-pub(crate) async fn forward_pod_connection(
+pub async fn forward_pod_connection<S>(
     client: Client,
     namespace: String,
     pod_name: String,
     pod_port: u16,
-    mut local_stream: TcpStream,
-) -> Result<(), AppError> {
+    mut local_stream: S,
+) -> Result<(), AppError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
     let pods: Api<Pod> = Api::namespaced(client, &namespace);
     let mut forwarder = OwnedPortforwarder(
         pods.portforward(&pod_name, &[pod_port])
@@ -259,7 +262,7 @@ pub(super) async fn start_pod_port_forward_in_registry(
             connection_registry.clone(),
         )
     };
-    let handle = tauri::async_runtime::spawn(async move {
+    let handle = crate::runtime::spawn(async move {
         run_port_forward_session(session_id, listener, loop_registry, handle_connection).await;
     });
     registry.insert(summary, handle)

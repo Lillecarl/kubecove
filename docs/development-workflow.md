@@ -39,6 +39,21 @@ mkdir -p .e2e/tools/allocator
 bun run lint:anti-slop
 ```
 
+## Headless Server Development
+
+The server is a separate Rust binary under `src-tauri/server`; it uses the shared backend without enabling the desktop feature. Build the browser runtime before compiling the server so the binary embeds the generated `dist/` assets:
+
+```sh
+KUBECOVE_PUBLIC_RUNTIME=web bun --bun vite build
+cargo build --locked --release --manifest-path src-tauri/server/Cargo.toml
+```
+
+The headless build does not require Tauri, a webview, or Linux desktop GUI development packages. Its supported release targets are Linux x64, macOS x64, and macOS arm64. The release workflow builds and archives each target separately.
+
+For an API-only server, run `cargo build --locked --release --no-default-features --manifest-path src-tauri/server/Cargo.toml`. This disables the default `web-ui` feature and needs neither Bun nor `dist/`. Run server tests and Clippy with `--no-default-features` to check this variant. The release workflow also builds and smoke-tests the full and slim Linux x64 container images, then publishes those tested artifacts to GHCR after the release gates pass. See [the container guide](../deploy/README.md) for targets and version tags.
+
+Run isolated server checks with `cargo test --locked --manifest-path src-tauri/server/Cargo.toml` and `cargo clippy --locked --manifest-path src-tauri/server/Cargo.toml --all-targets -- -D warnings`. The server verification contract and runtime E2E evidence are maintained separately from this packaging guide; building or testing the binary alone does not prove browser or desktop remote E2E behavior. See [the remote-host operations guide](wiki/Remote-Server.md) for listener, SSH, token, and data-directory use.
+
 ## Browser Dev Mock Mode
 
 `bun run tauri dev` starts Vite on Bun at `http://localhost:1430`. Opening it in a normal browser runs Svelte with browser-only mock Tauri responses for frontend inspection and automation.
