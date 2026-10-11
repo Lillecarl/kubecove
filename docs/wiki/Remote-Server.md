@@ -19,6 +19,8 @@ A browser port forward listens on `127.0.0.1` on the server. To reach it from a 
 
 The desktop app does not perform Cloudflare Access or OIDC sign-in. To use the desktop app against a server, run that server in token mode.
 
+Container releases provide `ghcr.io/timpan4/kubecove:<version>` with the browser app and `<version>-slim` with only the server API. Choose the full image for browser use, including OIDC. The slim variant supports the desktop remote client in token mode; it serves no browser assets. A separate browser frontend must share the API's exact origin through a reverse proxy. See the [container guide](https://github.com/Timpan4/kubecove/tree/main/deploy) for build and release availability.
+
 ## Choose an authentication mode
 
 | Mode | Server options | Typical access path | Notes |

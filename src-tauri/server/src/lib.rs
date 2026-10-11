@@ -11,18 +11,21 @@ pub mod tunnel;
 mod websocket;
 
 use access::{AccessIdentity, CloudflareAccess};
+#[cfg(feature = "web-ui")]
+use axum::http::Uri;
 use axum::{
     extract::{
         rejection::{JsonRejection, QueryRejection},
         Path, Query, State,
     },
-    http::{header, HeaderMap, StatusCode, Uri},
+    http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Extension, Json, Router,
 };
 use kubecove_lib::models::{AppError, AppErrorKind};
+#[cfg(feature = "web-ui")]
 use rust_embed::Embed;
 use security::{authenticated, equal_secret, NetworkPolicy};
 use serde::Deserialize;
@@ -34,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 struct AuthenticationRevoked(CancellationToken);
 
+#[cfg(feature = "web-ui")]
 #[derive(Embed)]
 #[folder = "../../dist/"]
 struct Assets;
@@ -75,7 +79,7 @@ impl IntoResponse for ApiError {
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/api/v1/auth", get(authentication_mode))
         .route("/api/v1/oidc/login", post(oidc_login))
         .route("/api/v1/oidc/callback", get(oidc_callback))
@@ -84,8 +88,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/session/close", post(close_session))
         .route("/api/v1/invoke/{command}", post(invoke))
         .route("/api/v1/channels", get(websocket::upgrade))
-        .route("/api/v1/channels/{id}/close", post(close_channel))
-        .fallback(get(asset))
+        .route("/api/v1/channels/{id}/close", post(close_channel));
+    #[cfg(feature = "web-ui")]
+    let router = router.fallback(get(asset));
+    router
         // Axum's default 2 MiB JSON limit matches the existing workspace import cap.
         .layer(middleware::from_fn_with_state(Arc::clone(&state), guard))
         .with_state(state)
@@ -421,6 +427,7 @@ fn json_error(error: JsonRejection) -> ApiError {
     )
 }
 
+#[cfg(feature = "web-ui")]
 async fn asset(State(state): State<Arc<AppState>>, headers: HeaderMap, uri: Uri) -> Response {
     if uri.path().starts_with("/api/") {
         return ApiError::new(
@@ -455,6 +462,7 @@ async fn asset(State(state): State<Arc<AppState>>, headers: HeaderMap, uri: Uri)
     ([(header::CONTENT_TYPE, mime)], asset.data.into_owned()).into_response()
 }
 
+#[cfg(any(feature = "web-ui", test))]
 fn index_with_policy(html: &str, policy: &str) -> Option<String> {
     let marker = html.find("http-equiv=\"Content-Security-Policy\"")?;
     let start = html[..marker].rfind("<meta")?;

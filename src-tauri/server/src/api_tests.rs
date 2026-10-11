@@ -35,6 +35,56 @@ fn state() -> Arc<AppState> {
     })
 }
 
+// API-only builds must retain authentication and Host checks while removing UI routes.
+#[cfg(not(feature = "web-ui"))]
+#[tokio::test]
+async fn api_only_has_no_assets_and_preserves_request_guards() {
+    let app = router(state());
+    for path in ["/", "/index.html", "/assets/missing.js"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::HOST, "localhost:1234")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/auth")
+                .header(header::HOST, "localhost:1234")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = app
+        .clone()
+        .oneshot(post("/api/v1/session").body(Body::from("{}")).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::HOST, "untrusted.example")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
 fn access_state() -> Arc<AppState> {
     let mut state = state();
     Arc::get_mut(&mut state).unwrap().access = Some(Arc::new(crate::access::tests::access()));

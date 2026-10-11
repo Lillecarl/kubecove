@@ -13,6 +13,26 @@ function job(name) {
   return lines.slice(start, end).join("\n");
 }
 
+test("both container variants are verified before registry publication", () => {
+  const build = job("container-build");
+  assert.match(build, /variant: \[full, slim\]/);
+  assert.match(build, /docker build[^\n]+--target "\$VARIANT"/);
+  assert.match(build, /scripts\/container-smoke\.sh/);
+  assert.match(build, /docker save/);
+  assert.doesNotMatch(build, /docker push|docker login/);
+  const verify = job("verify");
+  assert.match(verify, /- container-build/);
+  assert.match(verify, /test "\$\{CONTAINER_BUILD_RESULT\}" = "success"/);
+  const publish = job("publish");
+  assert.match(publish, /packages: write/);
+  assert.match(publish, /- container-build/);
+  assert.ok(publish.indexOf("Publish container images") > publish.indexOf("Verify final updater platform coverage"));
+  assert.match(publish, /docker load/);
+  assert.match(publish, /--password-stdin/);
+  assert.match(publish, /for variant in full slim/);
+  assert.match(publish, /suffix="-slim"/);
+});
+
 test("headless release builds the three standalone targets from web assets", () => {
   const build = job("server-build");
   for (const target of [

@@ -1,6 +1,13 @@
 # Headless container deployment
 
-The root `Dockerfile` builds `kubecove-server`, its embedded browser app and the bundled kubeconform sidecar. The runtime image runs as Debian's unprivileged `nobody` user, UID/GID `65534`, and contains no desktop runtime. The image target is `linux/amd64`, matching the bundled Linux sidecar. No prebuilt image has been published, so build it yourself.
+The root `Dockerfile` builds two variants of `kubecove-server`. Both run as Debian's unprivileged `nobody` user, UID/GID `65534`, and include CA certificates and the bundled kubeconform sidecar. Neither includes a compiler, Bun or a desktop runtime. Both target `linux/amd64`, matching the bundled Linux sidecar.
+
+| Variant | Release image | Contents |
+| --- | --- | --- |
+| `full`, the default | `ghcr.io/timpan4/kubecove:<version>` | Rust server with the browser app embedded |
+| `slim` | `ghcr.io/timpan4/kubecove:<version>-slim` | Rust server API and WebSocket transport, without browser assets |
+
+Release tags such as `app-v0.11.3` produce image tags `0.11.3` and `0.11.3-slim`. Images become available after a release completes the container smoke checks, frontend and Rust checks, Kubernetes E2E and desktop/server builds. Publication loads the tested image artifacts rather than rebuilding them. No image has been published from this branch yet. Build locally until a release provides the images. GHCR package visibility is an operator setting; if the package is private, pulling requires registry credentials.
 
 For client behaviour, authentication modes and server options, see [Run KubeCove on a remote host](../docs/wiki/Remote-Server.md).
 
@@ -11,9 +18,14 @@ From the repository root:
 ```sh
 docker build --pull --platform linux/amd64 -t kubecove-server:local .
 docker run --rm kubecove-server:local --help
+docker build --pull --platform linux/amd64 --target slim -t kubecove-server:local-slim .
 ```
 
-The build uses the official [Bun image](https://bun.com/docs/installation#docker), [Rust image](https://hub.docker.com/_/rust) and [Debian stable image](https://hub.docker.com/_/debian). Frontend and Rust dependencies use the committed lockfiles. `.dockerignore` limits the build context to the required inputs.
+The multi-stage build uses digest-pinned [Bun](https://bun.com/docs/installation#docker), [Rust](https://hub.docker.com/_/rust) and [Debian stable](https://hub.docker.com/_/debian) images. Frontend and Rust dependencies use the committed lockfiles. BuildKit caches Cargo downloads and compiled dependencies; the release binary is copied out of the cache into the runtime stage. Debug information is stripped. `.dockerignore` excludes local build caches and limits the build context to the required inputs. Update the pinned base digests as part of dependency maintenance.
+
+The slim target skips Bun, frontend compilation and the Rust asset-embedding dependencies. It has the same server options, authentication and Kubernetes behavior. Use it with the desktop remote client in token mode. A separately served browser UI must share the API's exact origin through a reverse proxy, including the OIDC callback path and WebSockets. The slim image alone supplies no browser login or OIDC completion page. It does not enable cross-origin access. Choose the full image for browser deployments, including the examples below. The embedded assets are small, so removing them saves less runtime space than removing the frontend build stage might suggest.
+
+On a Linux Docker host, verify either local image with `sudo bash scripts/container-smoke.sh kubecove-server:local full` or `sudo bash scripts/container-smoke.sh kubecove-server:local-slim slim`. This starts a disposable container with no network, a read-only root filesystem and a private temporary data mount. It checks UI selection, API authentication, CA certificates, the sidecar, non-root operation and graceful shutdown without contacting Kubernetes or printing credentials.
 
 The image's default command listens on container loopback, so Docker port publishing alone cannot reach it. On a standalone Docker host, either keep loopback and add a tunnel container in the same network namespace, or listen on `0.0.0.0:8443` with `--allow-remote`, `--tls-cert`, `--tls-key` and an exact HTTPS `--public-origin`. Mount certificate, key and kubeconfig files read-only. Persist `/data`; the server creates its private `0700` directory at `/data/kubecove`.
 
@@ -31,7 +43,7 @@ Broader permissions are an operator decision about what every permitted user may
 
 The [Kubernetes example](kubernetes/kubecove.yaml) runs the same server binary; there is no separate Kubernetes backend. It mounts a kubeconfig whose `in-cluster` context uses a projected, rotating ServiceAccount token and the cluster CA. It runs in token mode and is reached with `kubectl port-forward`.
 
-1. Push the image to a registry your k0s workers can pull. Replace `kubecove-server:local` in the example with that image reference, preferably by digest. Add an image pull secret if the registry requires one.
+1. Choose a released full image or push your local build to a registry your k0s workers can pull. Replace `kubecove-server:local` in the example with that image reference, preferably by digest. Add an image pull secret if the registry requires one.
 2. Create namespace `kubecove` and a PersistentVolumeClaim named `kubecove-data` in it. Choose storage class and capacity for your cluster. The volume must support a writable filesystem and `fsGroup`. The server creates its own private child directory and does not accept a group-readable volume root as its credential directory. k0s storage depends on your CSI provisioner; see [k0s storage](https://docs.k0sproject.io/stable/storage/).
 3. Review the RBAC binding, then apply the example:
 

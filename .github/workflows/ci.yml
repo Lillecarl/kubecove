@@ -139,7 +139,7 @@ jobs:
           persist-credentials: false
 
       - name: Test CI orchestration
-        run: node --test scripts/ci-workflow-regression.test.mjs
+        run: node --test scripts/ci-workflow-regression.test.mjs scripts/release-workflow-regression.test.mjs
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -266,6 +266,10 @@ jobs:
           fi
       - name: Test headless server
         run: cargo test --manifest-path src-tauri/server/Cargo.toml --locked
+      - name: Verify API-only server
+        run: |
+          cargo test --manifest-path src-tauri/server/Cargo.toml --locked --no-default-features
+          cargo clippy --manifest-path src-tauri/server/Cargo.toml --locked --no-default-features --all-targets -- -D warnings
       - name: Lint headless server
         run: cargo clippy --manifest-path src-tauri/server/Cargo.toml --all-targets --locked -- -D warnings
       - name: Build headless server

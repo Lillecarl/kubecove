@@ -107,6 +107,9 @@ jobs:
       - name: Check documentation
         run: bun run docs:check
 
+      - name: Test release orchestration
+        run: node --test scripts/release-workflow-regression.test.mjs
+
       - name: Typecheck frontend
         run: bun run typecheck
 
@@ -313,6 +316,41 @@ jobs:
           path: kubecove-server_*.tar.gz
           if-no-files-found: error
 
+  container-build:
+    name: Build container ${{ matrix.variant }}
+    needs:
+      - metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, slim]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Build and verify container
+        env:
+          VARIANT: ${{ matrix.variant }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          image="kubecove:release-${VARIANT}"
+          docker build --platform linux/amd64 --target "$VARIANT" --tag "$image" --build-arg "VERSION=${TAG_NAME#app-v}" --build-arg "REVISION=$GITHUB_SHA" .
+          sudo bash scripts/container-smoke.sh "$image" "$VARIANT" | tee "kubecove-container-${VARIANT}.txt"
+          docker save --output "kubecove-container-${VARIANT}.tar" "$image"
+      - name: Upload verified container
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: kubecove-container-${{ matrix.variant }}
+          path: |
+            kubecove-container-${{ matrix.variant }}.tar
+            kubecove-container-${{ matrix.variant }}.txt
+          if-no-files-found: error
+
   nix:
     name: Nix ${{ matrix.label }} release build
     strategy:
@@ -351,6 +389,7 @@ jobs:
       - rust
       - e2e
       - server-build
+      - container-build
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -363,6 +402,7 @@ jobs:
           RUST_RESULT: ${{ needs.rust.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
           SERVER_BUILD_RESULT: ${{ needs.server-build.result }}
+          CONTAINER_BUILD_RESULT: ${{ needs.container-build.result }}
         run: |
           set -euo pipefail
           echo "Release metadata: ${METADATA_RESULT}"
@@ -370,11 +410,13 @@ jobs:
           echo "Rust release checks: ${RUST_RESULT}"
           echo "Kubernetes E2E matrix: ${E2E_RESULT}"
           echo "Headless server builds: ${SERVER_BUILD_RESULT}"
+          echo "Container builds: ${CONTAINER_BUILD_RESULT}"
           test "${METADATA_RESULT}" = "success"
           test "${FRONTEND_RESULT}" = "success"
           test "${RUST_RESULT}" = "success"
           test "${E2E_RESULT}" = "success"
           test "${SERVER_BUILD_RESULT}" = "success"
+          test "${CONTAINER_BUILD_RESULT}" = "success"
 
   draft:
     name: Create draft release
@@ -540,9 +582,11 @@ jobs:
       - verify
       - build
       - server-build
+      - container-build
     permissions:
       actions: read
       contents: write
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -619,6 +663,27 @@ jobs:
             ].filter(Boolean).join("; "));
           }
           EOF
+
+      - name: Publish container images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GH_ACTOR: ${{ github.actor }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          registry_image="ghcr.io/${GH_REPO,,}"
+          version="${TAG_NAME#app-v}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GH_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          for variant in full slim; do
+            suffix=""
+            if [[ "$variant" == slim ]]; then suffix="-slim"; fi
+            docker load --input "server-assets/kubecove-container-${variant}/kubecove-container-${variant}.tar"
+            image="${registry_image}:${version}${suffix}"
+            docker tag "kubecove:release-${variant}" "$image"
+            docker push "$image"
+          done
 
       - name: Publish completed release
         if: needs.prepare.outputs.release-draft == 'true'
