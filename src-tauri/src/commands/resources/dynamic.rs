@@ -16,6 +16,7 @@ use crate::models::{
     HealthAssessmentState, ResourceDetailsFull, ResourceHealth, ResourceSummary, YamlEncoding,
     YamlViewMode,
 };
+use crate::runtime::State;
 use chrono::{TimeZone, Utc};
 use kube::{
     api::{Api, ApiResource, DynamicObject},
@@ -23,7 +24,6 @@ use kube::{
 };
 use serde_json::Value;
 use std::time::Instant;
-use tauri::State;
 
 pub(crate) fn api_resource_from_discovered(
     resource_kind: &DiscoveredResourceKind,
@@ -240,7 +240,7 @@ pub async fn dynamic_resources_summary_from(
         .collect())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_dynamic_resources(
     cluster_context: String,
     resource_kind: DiscoveredResourceKind,
@@ -367,7 +367,7 @@ pub async fn dynamic_resource_details_from(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_dynamic_resource_details(
     cluster_context: String,
     resource_kind: DiscoveredResourceKind,

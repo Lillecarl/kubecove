@@ -93,9 +93,9 @@ fn valid(request: &ArgoOperationRequest) -> Result<(), AppError> {
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn preflight_argo_operation(
-    store: tauri::State<'_, super::ArgoConnectionStore>,
+    store: crate::runtime::State<'_, super::ArgoConnectionStore>,
     request: ArgoOperationRequest,
 ) -> Result<ArgoOperationPreflight, AppError> {
     valid(&request)?;
@@ -320,9 +320,9 @@ async fn run_argo_operation_for_store(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn run_argo_operation(
-    store: tauri::State<'_, super::ArgoConnectionStore>,
+    store: crate::runtime::State<'_, super::ArgoConnectionStore>,
     confirmation: ArgoOperationConfirmation,
 ) -> Result<ArgoOperationResult, AppError> {
     run_argo_operation_for_store(&store, confirmation).await

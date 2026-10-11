@@ -1,6 +1,7 @@
 use super::{client_for_context, logs::read_log_line, send};
 use crate::models::AppErrorKind;
 use crate::models::{AggregatedLogStreamRequest, AppError, LogLineSource, StreamMessage};
+use crate::runtime::{Channel, JoinHandle};
 use futures_util::StreamExt;
 use k8s_openapi::{
     api::{
@@ -17,7 +18,6 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     time::Duration,
 };
-use tauri::{async_runtime::JoinHandle, ipc::Channel};
 
 const MAX_AGGREGATED_LOG_SOURCES: usize = 50;
 
@@ -362,7 +362,7 @@ fn reconcile_sources(
         } else {
             source_streams.attached.insert(source.clone());
         }
-        let handle = tauri::async_runtime::spawn(stream_log_source(
+        let handle = crate::runtime::spawn(stream_log_source(
             client.clone(),
             namespace.clone(),
             source.clone(),

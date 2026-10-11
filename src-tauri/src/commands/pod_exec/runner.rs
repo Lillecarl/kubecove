@@ -1,10 +1,10 @@
 use crate::models::{
     AppError, AppErrorKind, PodExecSessionMessage, PodExecSessionRequest, PodExecSessionSummary,
 };
+use crate::runtime::Channel;
 use futures_util::SinkExt;
 use k8s_openapi::{api::core::v1::Pod, apimachinery::pkg::apis::meta::v1::Status};
 use kube::api::{Api, AttachParams, AttachedProcess, TerminalSize};
-use tauri::ipc::Channel;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     sync::mpsc,
@@ -353,7 +353,7 @@ pub(super) async fn start_pod_exec_session_in_registry(
         },
     );
     let registry_for_task = registry.clone();
-    let handle = tauri::async_runtime::spawn(run_exec_session(
+    let handle = crate::runtime::spawn(run_exec_session(
         summary.clone(),
         request,
         command_rx,

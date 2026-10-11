@@ -50,7 +50,7 @@ fn app_project_summary_from_object(
 }
 
 /// Get detailed Argo CD `AppProject` information including YAML and metadata.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_argocd_appproject_details(
     cluster_context: String,
     name: String,
@@ -84,7 +84,7 @@ pub async fn get_argocd_appproject_details(
 }
 
 /// List Argo CD `AppProjects` in the cluster.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_argocd_appprojects(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,

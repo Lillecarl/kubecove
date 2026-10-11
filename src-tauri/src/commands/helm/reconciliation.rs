@@ -46,7 +46,7 @@ struct ResourceIdentity {
     resource_kind: DiscoveredResourceKind,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_helm_release_reconciliation(
     cluster_context: String,
     namespace: String,

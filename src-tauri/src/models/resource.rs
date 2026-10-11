@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{DiscoveredResourceKind, HealthAssessment};
+use super::{AppError, DiscoveredResourceKind, HealthAssessment};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +88,22 @@ pub struct ResourceListRequest {
     pub resource_kind: Option<DiscoveredResourceKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceScopeFailure {
+    pub cluster_context: String,
+    pub request: ResourceListRequest,
+    pub error: AppError,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceScopeResult {
+    pub resources: Vec<ResourceSummary>,
+    pub completed_requests: Vec<ResourceListRequest>,
+    pub failures: Vec<ResourceScopeFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -22,13 +22,21 @@ mod operations;
 mod pod_exec;
 mod rbac;
 mod rbac_review;
+#[cfg(feature = "desktop")]
+pub mod remote;
 mod resources;
-mod sessions;
+pub mod sessions;
 mod streams;
 mod usage;
 mod usage_webview;
+#[cfg(feature = "desktop")]
 mod workspace_files;
 
+#[cfg(not(feature = "desktop"))]
+pub use argo::{
+    active_credential_store_description, initialize_server_credential_store,
+    CredentialStoreDescription,
+};
 pub use argo::{
     connect_argo_server, detect_argocd, disconnect_argo_server, discover_argo_servers,
     forget_argo_credential, get_argo_application_inspector, get_argo_connection_status,
@@ -53,9 +61,11 @@ pub use events::{list_resource_events, resource_events_from};
 pub use flux::{detect_flux, get_flux_resource_details, list_flux_resources};
 pub use helm::{get_helm_release_details, get_helm_release_reconciliation, list_helm_releases};
 pub use incidents::{incident_cockpit_from, list_incident_cockpit};
+#[cfg(feature = "desktop")]
+pub use kubeconfig::pick_kubeconfig_paths;
 pub use kubeconfig::{
     add_kubeconfig_paths, get_kubeconfig_sources, init_kubeconfig_settings_path,
-    kubeconfig_source_key, pick_kubeconfig_paths, remove_kubeconfig_path, reorder_kubeconfig_paths,
+    kubeconfig_source_key, remove_kubeconfig_path, reorder_kubeconfig_paths,
     set_kubeconfig_env_var, set_show_kubeconfig_source_labels, KubeconfigSource,
     DEFAULT_KUBECONFIG_ENV_VAR,
 };
@@ -73,6 +83,11 @@ pub use pod_exec::{
 };
 pub use rbac::{list_rbac_inspection, rbac_inspection_from};
 pub use rbac_review::review_rbac_access;
+#[cfg(feature = "desktop")]
+pub use remote::{
+    remote_connect, remote_connection_status, remote_disconnect, remote_invoke,
+    remote_subscribe_channel, remote_unsubscribe_channel, RemoteConnectionStore,
+};
 pub use resources::{
     apply_yaml, dynamic_resource_details_from, dynamic_resources_summary_from,
     get_dynamic_resource_details, get_resource_details, get_resource_yaml, lint_kubernetes_yaml,
@@ -88,4 +103,5 @@ pub use streams::{
     start_resource_event_watch, start_resource_watch, stop_stream, StreamRegistry,
 };
 pub use usage::{get_app_usage_metrics, AppUsageMonitor};
+#[cfg(feature = "desktop")]
 pub use workspace_files::{pick_workspace_import_json, save_workspace_export_json};

@@ -74,6 +74,13 @@ pub(super) async fn resolve_service_request_target(
 ) -> Result<PortForwardTarget, AppError> {
     let client =
         client_for_context(&request.cluster_context, request.kubeconfig_env_var.clone()).await?;
+    resolve_service_request_target_with_client(request, client).await
+}
+
+pub(super) async fn resolve_service_request_target_with_client(
+    request: ValidatedPortForwardRequest,
+    client: Client,
+) -> Result<PortForwardTarget, AppError> {
     let resolved = resolve_service_target(
         client,
         &request.namespace,

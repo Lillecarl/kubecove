@@ -31,3 +31,14 @@ Exec remains out of scope for this ADR's implementation. Any exec UI must add a 
 ## Consequences
 
 Port-forwarding becomes the first live operational workflow in KubeCove without changing the app into a generic shell wrapper. The implementation adds a WebSocket-capable `kube-rs` path, Service-to-Pod resolution, and an in-memory session registry, but keeps cluster access behind typed Rust commands and keeps active tunnels visible and stoppable from the UI.
+
+## Amendment 2026-10-09: tunnelled forwards in desktop remote mode
+
+When the desktop app uses a remote `kubecove-server` ([ADR 0020](0020-headless-server-mode.md)), a port-forward may listen on the laptop instead of the server:
+
+- The desktop app binds the listener to `127.0.0.1` on the laptop under the port rules above. The server opens no TCP listener for a tunnelled forward.
+- Each accepted local connection opens a numbered stream on the owner's authenticated WebSocket. The server checks that the forward belongs to the current owner, resolves the target as it does for local forwards, Service re-resolution included, and relays bytes through the Kubernetes port-forward API.
+- Relay buffers are bounded by the existing session buffer sizes. A full buffer pauses reads from the sending side instead of dropping bytes. Frames for unknown, closed, or other-owner ids close that stream.
+- A tunnelled forward stops on explicit stop, session failure, scope changes as above, desktop app exit, owner takeover, or expiry of the server's reconnect grace window.
+
+Browser clients cannot open local listeners, so their forwards keep listening on the server's `127.0.0.1`, and the UI labels them as remote.

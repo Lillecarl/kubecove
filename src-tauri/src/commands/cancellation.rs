@@ -1,5 +1,6 @@
 #[cfg(test)]
 use crate::models::AppErrorKind;
+use crate::runtime::State;
 use crate::{
     commands::{helpers::client_cache, ArgoConnectionStore, ClusterLiveStore},
     models::{AppError, CancelBackendRequestsResult, CancelWorkspaceRequestsResult},
@@ -9,7 +10,6 @@ use std::{
     future::Future,
     sync::{Arc, Mutex},
 };
-use tauri::State;
 use tokio_util::sync::CancellationToken;
 
 struct RegisteredCancellation {
@@ -173,7 +173,7 @@ impl Drop for BackendCancellationGuard {
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn cancel_backend_requests(
     cancel_scope: String,
     registry: State<'_, BackendCancellationRegistry>,
@@ -183,7 +183,7 @@ pub fn cancel_backend_requests(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn cancel_workspace_requests(
     registry: State<'_, BackendCancellationRegistry>,
     live_store: State<'_, ClusterLiveStore>,

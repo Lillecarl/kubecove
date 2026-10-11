@@ -8,18 +8,35 @@ edition = "2021"
 rust-version = "1.91"
 
 [features]
-bench-support = []
-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
+default = ["desktop"]
+# Tauri shell and plugins. kubecove-server builds the library without it (ADR 0020).
+desktop = [
+    "dep:tauri",
+    "dep:tauri-build",
+    "dep:tauri-plugin-updater",
+    "dep:tauri-plugin-process",
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-opener",
+    "dep:tokio-tungstenite",
+    "dep:rustls",
+]
+bench-support = ["desktop"]
+e2e = ["desktop", "dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 
 [lib]
 name = "kubecove_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "kubecove"
+path = "src/main.rs"
+required-features = ["desktop"]
+
 [build-dependencies]
-tauri-build = { version = "=2.6.3", features = [] }
+tauri-build = { version = "=2.6.3", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "=2.11.6", features = [] }
+tauri = { version = "=2.11.6", features = [], optional = true }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 base64 = "=0.23.1"
@@ -35,21 +52,25 @@ tokio-util = "=0.7.19"
 tower = { version = "=0.5.3", features = ["util"] }
 http = "=1.5.0"
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
-tauri-plugin-updater = "=2.12.0"
-tauri-plugin-process = "=2.3.1"
-tauri-plugin-dialog = "=2.7.3"
+tauri-plugin-updater = { version = "=2.12.0", optional = true }
+tauri-plugin-process = { version = "=2.3.1", optional = true }
+tauri-plugin-dialog = { version = "=2.7.3", optional = true }
 tauri-plugin-wdio = { version = "=1.4.0", optional = true }
 tauri-plugin-wdio-webdriver = { version = "=1.4.0", optional = true }
-reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls-no-provider", "http2"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls-no-provider", "http2", "stream"] }
+tokio-tungstenite = { version = "=0.30.0", features = ["rustls-tls-native-roots"], optional = true }
+rustls = { version = "=0.23.45", default-features = false, features = ["ring"], optional = true }
 keyring = "=4.2.0"
+chacha20poly1305 = "=0.11.0"
+getrandom = "=0.4.3"
+libc = "=0.2.189"
 uuid = { version = "=1.26.1", features = ["v4"] }
-tauri-plugin-opener = "=2.5.5"
+tauri-plugin-opener = { version = "=2.5.5", optional = true }
 
 [dev-dependencies]
 codspeed-divan-compat = "=5.0.1"
 divan = { package = "codspeed-divan-compat-walltime", version = "=5.0.1" }
 proptest = "=1.11.0"
-rustls = { version = "=0.23.45", default-features = false, features = ["ring"] }
 tower-test = "=0.4.0"
 
 [[bench]]

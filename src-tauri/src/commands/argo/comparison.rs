@@ -114,10 +114,10 @@ async fn argo_resource_comparison(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_argo_resource_comparison(
-    store: tauri::State<'_, ArgoConnectionStore>,
-    cancellations: tauri::State<'_, BackendCancellationRegistry>,
+    store: crate::runtime::State<'_, ArgoConnectionStore>,
+    cancellations: crate::runtime::State<'_, BackendCancellationRegistry>,
     cluster_context: String,
     kubeconfig_env_var: Option<String>,
     connection_id: Option<String>,

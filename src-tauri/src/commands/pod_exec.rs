@@ -2,7 +2,7 @@ use crate::models::{
     AppError, PodExecSessionMessage, PodExecSessionRequest, PodExecSessionSummary,
     PodExecTerminalSize,
 };
-use tauri::{ipc::Channel, State};
+use crate::runtime::{Channel, State};
 
 mod registry;
 mod runner;
@@ -15,7 +15,7 @@ use runner::start_pod_exec_session_in_registry;
 use validation::validate_request;
 use validation::validate_terminal_size;
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn start_pod_exec_session(
     request: PodExecSessionRequest,
     channel: Channel<PodExecSessionMessage>,
@@ -24,7 +24,7 @@ pub async fn start_pod_exec_session(
     start_pod_exec_session_in_registry(request, channel, registry.inner()).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn write_pod_exec_stdin(
     session_id: String,
     data: String,
@@ -34,7 +34,7 @@ pub async fn write_pod_exec_stdin(
     Ok(true)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn resize_pod_exec_terminal(
     session_id: String,
     size: PodExecTerminalSize,
@@ -45,7 +45,7 @@ pub async fn resize_pod_exec_terminal(
     Ok(true)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn stop_pod_exec_session(
     session_id: String,
     registry: State<'_, PodExecRegistry>,
@@ -53,7 +53,7 @@ pub async fn stop_pod_exec_session(
     Ok(registry.stop(&session_id))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_pod_exec_sessions(
     registry: State<'_, PodExecRegistry>,
 ) -> Result<Vec<PodExecSessionSummary>, AppError> {

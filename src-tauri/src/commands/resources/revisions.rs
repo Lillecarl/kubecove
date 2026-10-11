@@ -9,7 +9,7 @@ use kube::{Api, Client};
 const CHANGE_CAUSE: &str = "kubernetes.io/change-cause";
 const REVISION: &str = "deployment.kubernetes.io/revision";
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_deployment_revisions(
     cluster_context: String,
     name: String,

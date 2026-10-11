@@ -1,5 +1,6 @@
 use crate::models::AppErrorKind;
 use crate::models::{AppError, PortForwardSessionSummary};
+use crate::runtime::JoinHandle;
 use chrono::Utc;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -8,7 +9,6 @@ use std::{
         Arc, Mutex,
     },
 };
-use tauri::async_runtime::JoinHandle;
 
 use super::target::PortForwardTarget;
 
@@ -31,6 +31,11 @@ pub struct PortForwardRegistry {
 }
 
 impl PortForwardRegistry {
+    /// Stop all listeners when their host session expires.
+    pub fn stop_all(&self) {
+        self.stop_outside_scope(&HashSet::new(), "");
+    }
+
     pub(super) fn session_id(&self) -> String {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         format!("port-forward-{id}")

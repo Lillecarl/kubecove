@@ -5,10 +5,10 @@ use crate::commands::{
     record_backend_error, record_backend_success, ClusterLiveStore,
 };
 use crate::models::{AppError, NamespaceSummary};
+use crate::runtime::State;
 use chrono::{DateTime, Utc};
 use kube::api::Api;
 use std::time::Instant;
-use tauri::State;
 
 fn namespace_age(creation_timestamp: Option<DateTime<Utc>>) -> String {
     match creation_timestamp {
@@ -60,7 +60,7 @@ fn k8s_openapi_time_to_datetime(timestamp: &k8s_openapi::jiff::Timestamp) -> Opt
     DateTime::from_timestamp(timestamp.as_second(), 0)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_namespaces(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,

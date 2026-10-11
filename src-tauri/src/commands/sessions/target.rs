@@ -142,6 +142,29 @@ pub(super) async fn resolve_port_forward_target(
     }
 }
 
+pub(super) async fn resolve_port_forward_target_with_client(
+    request: ValidatedPortForwardRequest,
+    client: Client,
+) -> Result<PortForwardTarget, AppError> {
+    match request.target_kind {
+        PortForwardTargetKind::Pod => Ok(PortForwardTarget {
+            cluster_context: request.cluster_context,
+            kubeconfig_env_var: request.kubeconfig_env_var,
+            kubeconfig_source_key: request.kubeconfig_source_key,
+            kubeconfig_source_label: request.kubeconfig_source_label,
+            namespace: request.namespace,
+            target_kind: PortForwardTargetKind::Pod,
+            target_name: request.target_name.clone(),
+            pod_name: request.target_name,
+            remote_port: request.remote_port,
+            pod_port: request.remote_port,
+        }),
+        PortForwardTargetKind::Service => {
+            service::resolve_service_request_target_with_client(request, client).await
+        }
+    }
+}
+
 pub(crate) async fn client_for_context(
     cluster_context: &str,
     kubeconfig_env_var: Option<String>,
