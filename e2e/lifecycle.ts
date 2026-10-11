@@ -442,6 +442,11 @@ async function buildAndDrive(env: Record<string, string | undefined>, smoke = fa
 	if (!artifacts) throw new Error("E2E artifacts directory is required");
 	const targetDir = profiling ? join(stateDir, "profile-target") : join(root, "src-tauri", "target");
 	const buildEnv = profiling ? { ...env, CARGO_TARGET_DIR: targetDir, KUBECOVE_PUBLIC_PROFILE: "true", KUBECOVE_PROFILE: "1" } : env;
+	if (!profiling && os !== "windows") {
+		await execute("bun", ["--bun", "vite", "build"], { KUBECOVE_PUBLIC_RUNTIME: "web" });
+		await execute("cargo", ["build", "--locked", "--manifest-path", "src-tauri/server/Cargo.toml"]);
+		buildEnv.KUBECOVE_HEADLESS_BINARY = join(root, "src-tauri/server/target/debug/kubecove-server");
+	}
 	await execute("bun", ["run", "tauri", "build", ...(profiling ? [] : ["--debug"]), "--no-bundle", "--config", "src-tauri/tauri.e2e.conf.json", "--features", "e2e"], buildEnv, false, profiling ? undefined : join(artifacts, "build.log"));
 	if (profiling) {
 		await assertDesktopProfileIdle();

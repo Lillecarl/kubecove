@@ -5,6 +5,7 @@ User-facing procedures start in the [public Wiki](https://github.com/Timpan4/kub
 ## Public product documentation
 
 - [Getting started and downloading](https://github.com/Timpan4/kubecove/wiki/Install-and-Update)
+- [Run KubeCove on a remote host](https://github.com/Timpan4/kubecove/wiki/Remote-Server)
 - [Kubernetes resource browser and topology](https://github.com/Timpan4/kubecove/wiki/Resource-Browser)
 - [Argo CD and Flux integration](https://github.com/Timpan4/kubecove/wiki/GitOps-Argo-CD-and-Flux)
 - [Helm inspection and reconciliation](https://github.com/Timpan4/kubecove/wiki/Helm-Reconciliation)
@@ -20,6 +21,8 @@ User-facing procedures start in the [public Wiki](https://github.com/Timpan4/kub
 - [Release footprint variants](release-footprint-variants.md) — isolated stable Cargo comparisons and package, startup, font, benchmark, and crash evidence.
 - [Product and architecture](product-and-architecture.md) — current product principles, desktop architecture, and trust boundaries.
 - [Release Guide](release.md) — release preparation and publishing.
+- [Headless server operations](wiki/Remote-Server.md) — supported remote-host setup and secure access.
+- [Container and Kubernetes deployment](../deploy/README.md) — image build, RBAC choice, private k0s access, Cloudflare Tunnel and Access, and OIDC with Authentik.
 
 ## Governance
 

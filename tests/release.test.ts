@@ -286,12 +286,18 @@ example = "9.9.9"
 			'[[package]]\nname = "kubecove"\nversion = "0.1.0"\n',
 		);
 
+		mkdirSync(join(root, "src-tauri", "server"), { recursive: true });
+		writeFileSync(join(root, "src-tauri", "server", "Cargo.toml"), '[package]\nname = "kubecove-server"\nversion = "0.1.0"\n');
+		writeFileSync(join(root, "src-tauri", "server", "Cargo.lock"), '[[package]]\nname = "kubecove"\nversion = "0.1.0"\n\n[[package]]\nname = "kubecove-server"\nversion = "0.1.0"\n');
+
 		updateWorkspaceReleaseVersions("0.2.0", root);
 
 		expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version).toBe("0.2.0");
 		expect(JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")).version).toBe("0.2.0");
 		expect(readFileSync(join(root, "src-tauri", "Cargo.toml"), "utf8")).toContain('version = "0.2.0"');
 		expect(readFileSync(join(root, "src-tauri", "Cargo.lock"), "utf8")).toContain('version = "0.2.0"');
+		expect(readFileSync(join(root, "src-tauri", "server", "Cargo.toml"), "utf8")).toContain('version = "0.2.0"');
+		expect(readFileSync(join(root, "src-tauri", "server", "Cargo.lock"), "utf8")).not.toContain('version = "0.1.0"');
 	});
 
 	test("fails a bump when Cargo.lock is missing the kubecove package", () => {

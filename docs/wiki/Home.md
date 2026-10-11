@@ -9,9 +9,10 @@ Kubernetes credentials remain on the Rust side of the desktop boundary. KubeCove
 ## Start
 
 1. [Download latest installer](https://github.com/Timpan4/kubecove/releases/latest). Installers are beta builds; OS trust prompts may require approval.
-2. Make a readable kubeconfig context available through `$KUBECONFIG` or your default kubeconfig location.
-3. Create a workspace. Choose a context, then narrow namespaces and resource kinds when useful.
-4. Open a resource. Inspect details, events, logs, metrics, YAML, ownership, and related GitOps or Helm metadata before using a guarded action.
+2. To keep cluster credentials and connectivity on a remote operations host or an operator-deployed Kubernetes container, follow [Run KubeCove on a remote host](https://github.com/Timpan4/kubecove/wiki/Remote-Server). The server has one active owner and requires authenticated access.
+3. Make a readable kubeconfig context available through `$KUBECONFIG` or your default kubeconfig location.
+4. Create a workspace. Choose a context, then narrow namespaces and resource kinds when useful.
+5. Open a resource. Inspect details, events, logs, metrics, YAML, ownership, and related GitOps or Helm metadata before using a guarded action.
 
 ## Safety boundary
 
