@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use kubecove_lib::models::AppErrorKind;
+use kubecove_lib::{commands::SessionScope, models::AppErrorKind};
 use openidconnect::{
     core::{
         CoreAuthenticationFlow, CoreClient, CoreIdTokenClaims, CoreIdTokenVerifier,
@@ -20,7 +20,7 @@ use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subtle::ConstantTimeEq;
@@ -115,8 +115,9 @@ pub struct Oidc {
     metadata: CoreProviderMetadata,
     transaction_key: [u8; 32],
     credentials: Mutex<HashMap<String, Credential>>,
-    /// The credential whose ID token Kubernetes requests carry.
-    active: Mutex<Option<Active>>,
+    /// The open sessions, each with the sign-in whose ID token its
+    /// Kubernetes requests carry.
+    bound: Mutex<Vec<Binding>>,
     refreshing: tokio::sync::Mutex<()>,
     allow_http_test: bool,
 }
@@ -137,9 +138,10 @@ struct Tokens {
     subject: String,
 }
 
-struct Active {
+struct Binding {
     credential: String,
     owner: String,
+    scope: Arc<SessionScope>,
 }
 
 struct Verified {
@@ -201,7 +203,7 @@ impl Oidc {
             metadata,
             transaction_key,
             credentials: Mutex::new(HashMap::new()),
-            active: Mutex::new(None),
+            bound: Mutex::new(Vec::new()),
             refreshing: tokio::sync::Mutex::new(()),
             allow_http_test: false,
         })
@@ -434,41 +436,55 @@ impl Oidc {
             })
     }
 
-    /// Makes this sign-in's ID token the one Kubernetes requests carry for
-    /// the owner session `owner`, renewing it first if it is about to expire.
-    pub async fn activate(&self, credential: &OidcCredential, owner: &str) -> Result<(), ApiError> {
+    /// Makes this sign-in's ID token the one the session `owner` sends to
+    /// Kubernetes through `scope`, renewing it first if it is about to
+    /// expire.
+    pub async fn activate(
+        &self,
+        credential: &OidcCredential,
+        owner: &str,
+        scope: Arc<SessionScope>,
+    ) -> Result<(), ApiError> {
         if !self.forwards_credentials() {
             return Ok(());
         }
         self.ensure_fresh(&credential.0).await?;
-        *self.active.lock().map_err(|_| oidc_unavailable())? = Some(Active {
-            credential: credential.0.clone(),
-            owner: owner.to_owned(),
-        });
+        {
+            let mut bound = self.bound.lock().map_err(|_| oidc_unavailable())?;
+            // A resumed session keeps sending its old token until publish
+            // sets the new one, never none.
+            bound.retain(|binding| binding.owner != owner);
+            bound.push(Binding {
+                credential: credential.0.clone(),
+                owner: owner.to_owned(),
+                scope,
+            });
+        }
         self.publish(&credential.0);
         Ok(())
     }
 
-    /// Stops forwarding this sign-in's token, if it is the active one.
+    /// Stops forwarding this sign-in's token, in every session it signs.
     pub fn deactivate(&self, credential: &str) {
-        self.clear_if(|active| active.credential == credential);
+        self.unbind(|binding| binding.credential == credential);
     }
 
-    /// Stops forwarding for an owner session that ended. Keyed by owner, so
-    /// a late call for a replaced owner cannot clear its successor, even when
-    /// both used the same sign-in.
+    /// Stops forwarding for a session that ended.
     pub fn release_owner(&self, owner: &str) {
-        self.clear_if(|active| active.owner == owner);
+        self.unbind(|binding| binding.owner == owner);
     }
 
-    fn clear_if(&self, matches: impl Fn(&Active) -> bool) {
-        let Ok(mut active) = self.active.lock() else {
+    fn unbind(&self, matches: impl Fn(&Binding) -> bool) {
+        let Ok(mut bound) = self.bound.lock() else {
             return;
         };
-        if active.as_ref().is_some_and(matches) {
-            *active = None;
-            kubecove_lib::commands::set_forwarded_bearer(None);
-        }
+        bound.retain(|binding| {
+            let remove = matches(binding);
+            if remove {
+                binding.scope.set_bearer(None);
+            }
+            !remove
+        });
     }
 
     fn publish(&self, credential: &str) {
@@ -478,30 +494,34 @@ impl Oidc {
                 .and_then(|credential| credential.tokens.as_ref())
                 .map(|tokens| tokens.id_token.clone())
         });
-        // Held while setting, so a concurrent clear cannot be overwritten.
-        let Ok(active) = self.active.lock() else {
+        // Held while setting, so a concurrent unbind cannot be overwritten.
+        let Ok(bound) = self.bound.lock() else {
             return;
         };
-        if active
-            .as_ref()
-            .is_some_and(|active| active.credential == credential)
-        {
-            kubecove_lib::commands::set_forwarded_bearer(token.as_deref());
+        for binding in bound.iter().filter(|binding| binding.credential == credential) {
+            binding.scope.set_bearer(token.as_deref());
         }
     }
 
-    /// Renews the active sign-in's ID token until the server stops. Only the
-    /// active owner is renewed: renewing every sign-in would keep a closed
-    /// browser's provider session alive past the realm's idle timeout.
+    /// Renews the ID token of every sign-in with an open session until the
+    /// server stops. A sign-in without one is not renewed: that would keep a
+    /// closed browser's provider session alive past the realm's idle timeout.
     pub async fn refresh_forever(&self) {
         loop {
             tokio::time::sleep(REFRESH_INTERVAL).await;
-            let active = self
-                .active
+            let mut credentials = self
+                .bound
                 .lock()
-                .ok()
-                .and_then(|active| active.as_ref().map(|active| active.credential.clone()));
-            if let Some(credential) = active {
+                .map(|bound| {
+                    bound
+                        .iter()
+                        .map(|binding| binding.credential.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            credentials.sort_unstable();
+            credentials.dedup();
+            for credential in credentials {
                 let _ = self.ensure_fresh(&credential).await;
             }
         }
@@ -677,7 +697,7 @@ impl Oidc {
             metadata,
             transaction_key: key,
             credentials: Mutex::new(HashMap::new()),
-            active: Mutex::new(None),
+            bound: Mutex::new(Vec::new()),
             refreshing: tokio::sync::Mutex::new(()),
             allow_http_test: true,
         })

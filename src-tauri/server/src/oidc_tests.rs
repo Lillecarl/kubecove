@@ -268,15 +268,8 @@ async fn state_cookie_is_browser_bound_and_authorization_code_replay_fails() {
         .any(|value| value.to_str().unwrap().contains("Max-Age=0")));
 }
 
-// The forwarded bearer is process-wide, so one test walks the whole lifecycle.
-#[tokio::test]
-async fn forwarded_id_token_follows_owner_refresh_and_revocation() {
-    use kubecove_lib::commands::forwarded_bearer;
-    let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
-        .await
-        .unwrap();
-    provider.set_claim_mode(mock::ClaimMode::ShortLived);
-    let (headers, callback) = pending_callback(&oidc).await;
+async fn signed_in(oidc: &Oidc) -> (HeaderMap, crate::oidc::AuthSession) {
+    let (headers, callback) = pending_callback(oidc).await;
     let response = oidc.callback(&headers, callback).await.unwrap();
     let cookie = response
         .headers()
@@ -292,35 +285,65 @@ async fn forwarded_id_token_follows_owner_refresh_and_revocation() {
     let mut headers = HeaderMap::new();
     headers.insert(header::COOKIE, cookie.parse().unwrap());
     let session = oidc.verify(&headers).unwrap();
+    (headers, session)
+}
+
+#[tokio::test]
+async fn forwarded_id_token_follows_session_refresh_and_revocation() {
+    use kubecove_lib::commands::SessionScope;
+    let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+        .await
+        .unwrap();
+    provider.set_claim_mode(mock::ClaimMode::ShortLived);
+    let (headers, session) = signed_in(&oidc).await;
     // The session outlives the two-second ID token.
     assert!(session.identity.expires_at > Instant::now() + Duration::from_hours(1));
+    let (_, other) = signed_in(&oidc).await;
 
     // The login token expires inside the refresh margin, so activation renews it.
-    oidc.activate(&session.credential, "owner-1").await.unwrap();
+    let first_scope = SessionScope::new(None);
+    oidc.activate(&session.credential, "owner-1", Arc::clone(&first_scope))
+        .await
+        .unwrap();
     assert_eq!(provider.refreshes(), 1);
-    let first = forwarded_bearer().unwrap();
+    let first = first_scope.bearer().unwrap();
     assert!(first.starts_with("Bearer ey"));
 
-    oidc.release_owner("owner-0");
-    assert_eq!(forwarded_bearer().as_deref(), Some(first.as_str()));
-    oidc.release_owner("owner-1");
-    assert_eq!(forwarded_bearer(), None);
+    // A second sign-in's session carries its own token beside the first.
+    let other_scope = SessionScope::new(None);
+    oidc.activate(&other.credential, "owner-other", Arc::clone(&other_scope))
+        .await
+        .unwrap();
+    let other_token = other_scope.bearer().unwrap();
+    assert_ne!(other_token, first);
+    assert_eq!(first_scope.bearer().as_deref(), Some(first.as_str()));
 
-    oidc.activate(&session.credential, "owner-2").await.unwrap();
-    assert_eq!(provider.refreshes(), 2);
-    assert_ne!(forwarded_bearer().unwrap(), first);
+    oidc.release_owner("owner-0");
+    assert_eq!(first_scope.bearer().as_deref(), Some(first.as_str()));
+    oidc.release_owner("owner-1");
+    assert_eq!(first_scope.bearer(), None);
+    assert_eq!(other_scope.bearer(), Some(other_token.clone()));
+
+    let second_scope = SessionScope::new(None);
+    oidc.activate(&session.credential, "owner-2", Arc::clone(&second_scope))
+        .await
+        .unwrap();
+    assert_eq!(provider.refreshes(), 3);
+    assert_ne!(second_scope.bearer().unwrap(), first);
 
     // A refusal while the token still works keeps the session.
     provider.set_claim_mode(mock::ClaimMode::RefreshRefused);
     oidc.ensure_fresh(&session.credential.0).await.unwrap();
-    assert!(forwarded_bearer().is_some());
+    assert!(second_scope.bearer().is_some());
 
-    // A refusal after it expired revokes the sign-in and stops forwarding.
+    // A refusal after it expired revokes that sign-in and stops its
+    // forwarding, and only its.
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert!(oidc.ensure_fresh(&session.credential.0).await.is_err());
     assert!(session.revoked.is_cancelled());
     assert!(oidc.verify(&headers).is_err());
-    assert_eq!(forwarded_bearer(), None);
+    assert_eq!(second_scope.bearer(), None);
+    assert_eq!(other_scope.bearer(), Some(other_token));
 }
 
 #[tokio::test]
