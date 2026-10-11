@@ -166,6 +166,9 @@ jobs:
       - name: Typecheck frontend
         run: bun run typecheck
 
+      - name: Typecheck benchmark fixtures
+        run: bun run typecheck:bench
+
       - name: Check Svelte frontend
         run: bun run svelte:check
 
