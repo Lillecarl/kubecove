@@ -94,16 +94,19 @@ async fn provider_outage_suspends_expired_token_and_recovers_without_new_login()
     provider.set_claim_mode(mock::ClaimMode::RefreshUnavailable);
     oidc.ensure_fresh(&auth.credential.0).await.unwrap();
     assert!(scope.bearer().is_some(), "unexpired tokens remain usable");
-    oidc.credentials
-        .lock()
-        .unwrap()
-        .get_mut(&auth.credential.0)
-        .unwrap()
+    let expires = oidc.credentials.lock().unwrap()[&auth.credential.0]
         .tokens
-        .as_mut()
+        .as_ref()
         .unwrap()
-        .id_expires_unix = unix_now();
-    let _ = oidc.ensure_fresh(&auth.credential.0).await;
+        .id_expires_unix;
+    let deadline = std::time::UNIX_EPOCH + Duration::from_secs(expires);
+    tokio::time::sleep(
+        deadline
+            .duration_since(std::time::SystemTime::now())
+            .unwrap_or_default(),
+    )
+    .await;
+    // No refresh tick occurs between expiry and the next cached-client request.
     assert!(!auth.revoked.is_cancelled());
     assert!(oidc.verify(&headers).is_ok());
     assert!(scope.bearer().is_none());
@@ -114,6 +117,44 @@ async fn provider_outage_suspends_expired_token_and_recovers_without_new_login()
         scope.bearer().is_some(),
         "recovery republishes to the existing session"
     );
+}
+
+#[tokio::test]
+async fn unusable_refresh_retains_rotation_for_recovery() {
+    for mode in [
+        mock::ClaimMode::MissingIdToken,
+        mock::ClaimMode::NonceMismatch,
+    ] {
+        let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+            .await
+            .unwrap();
+        provider.set_claim_mode(mock::ClaimMode::ShortLived);
+        let (headers, auth) = signed_in(&oidc).await;
+        let scope = SessionScope::new(None);
+        oidc.activate(&auth.credential, "owner", Arc::clone(&scope))
+            .await
+            .unwrap();
+        oidc.credentials
+            .lock()
+            .unwrap()
+            .get_mut(&auth.credential.0)
+            .unwrap()
+            .tokens
+            .as_mut()
+            .unwrap()
+            .id_expires_unix = unix_now();
+        provider.set_claim_mode(mode);
+        oidc.ensure_fresh(&auth.credential.0).await.unwrap();
+        assert!(scope.bearer().is_none());
+        assert!(oidc.verify(&headers).is_ok());
+        provider.set_claim_mode(mock::ClaimMode::Valid);
+        oidc.ensure_fresh(&auth.credential.0).await.unwrap();
+        assert!(
+            scope.bearer().is_some(),
+            "rotated refresh token must permit recovery after {mode:?}"
+        );
+        assert!(!auth.revoked.is_cancelled());
+    }
 }
 
 #[tokio::test]
@@ -485,6 +526,7 @@ async fn forwarded_id_token_follows_session_refresh_and_revocation() {
     assert!(first.starts_with("Bearer ey"));
 
     // A second sign-in's session carries its own token beside the first.
+    provider.set_claim_mode(mock::ClaimMode::Valid);
     let other_scope = SessionScope::new(None);
     oidc.activate(&other.credential, "owner-other", Arc::clone(&other_scope))
         .await
@@ -499,6 +541,7 @@ async fn forwarded_id_token_follows_session_refresh_and_revocation() {
     assert_eq!(first_scope.bearer(), None);
     assert_eq!(other_scope.bearer(), Some(other_token.clone()));
 
+    provider.set_claim_mode(mock::ClaimMode::ShortLived);
     let second_scope = SessionScope::new(None);
     oidc.activate(&session.credential, "owner-2", Arc::clone(&second_scope))
         .await

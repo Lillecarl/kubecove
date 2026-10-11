@@ -444,6 +444,9 @@ fn refresh(
         "jti": crate::security::random_token().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     });
     provider.audience(&mut claims);
+    if matches!(mode, ClaimMode::NonceMismatch) {
+        claims["nonce"] = json!("wrong-nonce");
+    }
     let id_token = encode(
         &Header::new(Algorithm::RS256),
         &claims,
@@ -451,8 +454,12 @@ fn refresh(
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let refresh_token = issue_refresh_token(provider, nonce)?;
-    Ok(Json(json!({
+    let mut response = json!({
         "access_token": "discarded-test-access-token", "token_type": "Bearer",
         "expires_in": lifetime, "id_token": id_token, "refresh_token": refresh_token,
-    })))
+    });
+    if matches!(mode, ClaimMode::MissingIdToken) {
+        response.as_object_mut().unwrap().remove("id_token");
+    }
+    Ok(Json(response))
 }

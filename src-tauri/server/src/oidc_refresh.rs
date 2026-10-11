@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 enum RefreshFailure {
     Transient,
+    Unusable(Option<String>),
     Refused,
 }
 
@@ -33,7 +34,12 @@ impl Oidc {
             .tokens
             .as_ref()
             .filter(|tokens| tokens.id_expires_unix > unix_now())
-            .map(|tokens| tokens.id_token.as_str());
+            .map(|tokens| {
+                (
+                    tokens.id_token.as_str(),
+                    tokens.id_expires_unix.min(entry.expires_unix),
+                )
+            });
         let mut bound = self.bound.lock().map_err(|_| oidc_unavailable())?;
         // Check under the same lock used by release_owner, so cleanup cannot
         // finish before this check and then have activation recreate its binding.
@@ -81,11 +87,18 @@ impl Oidc {
             return;
         };
         self.prune_expired(&mut credentials);
-        let token = credentials
-            .get(credential)
-            .and_then(|entry| entry.tokens.as_ref())
-            .filter(|tokens| tokens.id_expires_unix > unix_now())
-            .map(|tokens| tokens.id_token.as_str());
+        let token = credentials.get(credential).and_then(|entry| {
+            entry
+                .tokens
+                .as_ref()
+                .filter(|tokens| tokens.id_expires_unix > unix_now())
+                .map(|tokens| {
+                    (
+                        tokens.id_token.as_str(),
+                        tokens.id_expires_unix.min(entry.expires_unix),
+                    )
+                })
+        });
         // Registry and bindings remain locked until publication, so logout cannot
         // clear a binding and then have it overwritten with a previously read token.
         let Ok(mut bound) = self.bound.lock() else {
@@ -151,6 +164,11 @@ impl Oidc {
             let entry = credentials.get_mut(credential).ok_or_else(invalid_auth)?;
             match result {
                 Ok(renewed) => entry.tokens = Some(renewed),
+                Err(RefreshFailure::Unusable(Some(rotated))) => {
+                    if let Some(tokens) = entry.tokens.as_mut() {
+                        tokens.refresh_token = Some(rotated);
+                    }
+                }
                 Err(RefreshFailure::Refused) if tokens.id_expires_unix <= unix_now() => {
                     entry.revoked.cancel();
                     credentials.remove(credential);
@@ -204,7 +222,11 @@ impl Oidc {
                 }
                 _ => RefreshFailure::Transient,
             })?;
-        let id_token = response.id_token().ok_or(RefreshFailure::Transient)?;
+        // A successful token response can rotate the refresh credential even
+        // when its ID token cannot be used. Preserve rotation for the next retry.
+        let rotated = response.refresh_token().map(|token| token.secret().clone());
+        let unusable = || RefreshFailure::Unusable(rotated.clone());
+        let id_token = response.id_token().ok_or_else(unusable)?;
         let login_nonce = tokens.nonce.clone();
         let claims = id_token
             .claims(
@@ -216,20 +238,17 @@ impl Oidc {
                     _ => Ok(()),
                 },
             )
-            .map_err(|_| RefreshFailure::Transient)?;
+            .map_err(|_| unusable())?;
         let (subject, exp) = self
             .accept_claims(claims, &id_token.to_string())
-            .ok_or(RefreshFailure::Transient)?;
+            .ok_or_else(unusable)?;
         if subject != tokens.subject {
-            return Err(RefreshFailure::Transient);
+            return Err(unusable());
         }
         Ok(Tokens {
             id_token: id_token.to_string(),
             id_expires_unix: exp,
-            refresh_token: response
-                .refresh_token()
-                .map(|token| token.secret().clone())
-                .or_else(|| tokens.refresh_token.clone()),
+            refresh_token: rotated.or_else(|| tokens.refresh_token.clone()),
             nonce: tokens.nonce.clone(),
             subject,
         })

@@ -27,20 +27,28 @@ pub(crate) fn forwarded_bearer_enabled() -> bool {
 }
 
 #[derive(Default)]
-pub(crate) struct BearerSlot(RwLock<Option<HeaderValue>>);
+pub(crate) struct BearerSlot(RwLock<Option<(HeaderValue, u64)>>);
 
 impl BearerSlot {
-    pub(crate) fn set(&self, token: Option<&str>) {
-        let value = token.and_then(|token| {
+    pub(crate) fn set(&self, token: Option<(&str, u64)>) {
+        let value = token.and_then(|(token, expires_unix)| {
             let mut value = HeaderValue::from_str(&format!("Bearer {token}")).ok()?;
             value.set_sensitive(true);
-            Some(value)
+            Some((value, expires_unix))
         });
         *self.0.write().expect("forwarded bearer lock") = value;
     }
 
     pub(crate) fn get(&self) -> Option<HeaderValue> {
-        self.0.read().expect("forwarded bearer lock").clone()
+        let mut slot = self.0.write().expect("forwarded bearer lock");
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+        if slot
+            .as_ref()
+            .is_some_and(|(_, expires)| !now.is_ok_and(|now| now.as_secs() < *expires))
+        {
+            *slot = None;
+        }
+        slot.as_ref().map(|(value, _)| value.clone())
     }
 }
 
@@ -146,7 +154,7 @@ mod tests {
 
         let slot = Arc::new(BearerSlot::default());
         let layer = ForwardedBearerLayer(Some(Arc::clone(&slot)));
-        slot.set(Some("user"));
+        slot.set(Some(("user", u64::MAX)));
         assert_eq!(
             sent(&layer, Some("Bearer sa")).await.as_deref(),
             Some("Bearer user")
@@ -168,8 +176,8 @@ mod tests {
 
         let alice = SessionScope::new(None);
         let bob = SessionScope::new(None);
-        alice.set_bearer(Some("alice"));
-        bob.set_bearer(Some("bob"));
+        alice.set_bearer(Some(("alice", u64::MAX)));
+        bob.set_bearer(Some(("bob", u64::MAX)));
         let alice_layer = Arc::clone(&alice)
             .run(async { layer_for(true) })
             .await
@@ -190,7 +198,7 @@ mod tests {
         );
         assert_eq!(sent(&bob_layer, None).await.as_deref(), Some("Bearer bob"));
 
-        alice.set_bearer(Some("alice-renewed"));
+        alice.set_bearer(Some(("alice-renewed", u64::MAX)));
         assert_eq!(
             sent(&alice_layer, None).await.as_deref(),
             Some("Bearer alice-renewed")

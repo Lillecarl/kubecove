@@ -39,8 +39,9 @@ impl SessionScope {
     }
 
     /// Sets the bearer token Kubernetes requests carry while forwarding is
-    /// enabled. `None` sends requests without credentials.
-    pub fn set_bearer(&self, token: Option<&str>) {
+    /// enabled, until the supplied Unix deadline. `None` sends requests without
+    /// credentials. Expiry is checked by each request, independent of renewal.
+    pub fn set_bearer(&self, token: Option<(&str, u64)>) {
         self.bearer.set(token);
     }
 
