@@ -6,10 +6,14 @@ use super::{
 };
 use crate::ApiError;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use futures_util::{stream::FuturesUnordered, StreamExt};
 use kubecove_lib::{commands::SessionScope, models::AppErrorKind};
 use openidconnect::RequestTokenError;
 use openidconnect::{Nonce, OAuth2TokenResponse, RefreshToken, TokenResponse};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tokio_util::sync::CancellationToken;
 
 enum RefreshFailure {
@@ -17,6 +21,10 @@ enum RefreshFailure {
     Unusable(Option<String>),
     Refused,
 }
+
+#[cfg(test)]
+#[path = "oidc_refresh_tests.rs"]
+mod tests;
 
 impl Oidc {
     /// Bind only after renewal and while the caller holds the owner's request gate.
@@ -121,22 +129,31 @@ impl Oidc {
 
     /// Renew only sign-ins with an open session.
     pub async fn refresh_forever(&self) {
+        let mut pending = FuturesUnordered::new();
+        let mut refreshing = HashSet::new();
+        let mut ticks = tokio::time::interval(REFRESH_INTERVAL);
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        ticks.tick().await;
         loop {
-            tokio::time::sleep(REFRESH_INTERVAL).await;
-            let mut credentials = self
-                .bound
-                .lock()
-                .map(|bound| {
-                    bound
-                        .iter()
-                        .map(|binding| binding.credential.clone())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            credentials.sort_unstable();
-            credentials.dedup();
-            for credential in credentials {
-                let _ = self.ensure_fresh(&credential).await;
+            tokio::select! {
+                _ = ticks.tick() => {
+                    let credentials = self.bound.lock().map(|bound| {
+                        bound.iter().map(|binding| binding.credential.clone()).collect::<Vec<_>>()
+                    }).unwrap_or_default();
+                    for credential in credentials {
+                        // Keep one background renewal per sign-in while other
+                        // users and subsequent ticks continue independently.
+                        if refreshing.insert(credential.clone()) {
+                            pending.push(async move {
+                                let _ = self.ensure_fresh(&credential).await;
+                                credential
+                            });
+                        }
+                    }
+                }
+                Some(credential) = pending.next() => {
+                    refreshing.remove(&credential);
+                }
             }
         }
     }
