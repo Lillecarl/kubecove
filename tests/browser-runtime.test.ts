@@ -51,7 +51,14 @@ beforeEach(() => {
 	Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: TestWebSocket });
 });
 
-function jsonResponse(body: unknown, status = 200): Response {
+type TestResponseBody = Record<string, string | boolean | number>;
+type FetchHandler = (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>;
+
+function setFetch(handler: FetchHandler): void {
+	globalThis.fetch = Object.assign(handler, { preconnect: originalFetch.preconnect });
+}
+
+function jsonResponse(body: TestResponseBody, status = 200): Response {
 	return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
@@ -65,16 +72,16 @@ afterEach(() => {
 describe("browser OIDC session lifecycle", () => {
 	test("starts sign-in with a cookie POST before navigating to the provider", async () => {
 		let request: RequestInit | undefined;
-		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		setFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
 			expect(String(input)).toBe("https://kubecove.example/api/v1/oidc/login");
 			request = init;
 			return jsonResponse({ authorizationUrl: "https://identity.example/authorize?state=fixture" });
-		}) as typeof fetch;
+		});
 		await startBrowserOidcSignIn();
 		expect(request).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
 		expect(navigation).toBe("https://identity.example/authorize?state=fixture");
 		navigation = null;
-		globalThis.fetch = (async () => jsonResponse({ authorizationUrl: "javascript:alert(1)" })) as typeof fetch;
+		setFetch(async () => jsonResponse({ authorizationUrl: "javascript:alert(1)" }));
 		await expect(startBrowserOidcSignIn()).rejects.toThrow("invalid sign-in response");
 		expect(navigation).toBeNull();
 	});
@@ -84,7 +91,7 @@ describe("browser OIDC session lifecycle", () => {
 		const requests: { url: string; init?: RequestInit }[] = [];
 		let sessionRequests = 0;
 		let authChecks = 0;
-		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		setFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
 			requests.push({ url, init });
 			if (url.endsWith("/api/v1/auth")) {
@@ -99,7 +106,7 @@ describe("browser OIDC session lifecycle", () => {
 			}
 			if (url.endsWith("/api/v1/oidc/logout")) return jsonResponse({});
 			throw new Error(`Unexpected request to ${url}`);
-		}) as typeof fetch;
+		});
 
 		await initializeBrowserSession();
 		expect(requests[1]?.url).toBe("https://kubecove.example/api/v1/session");
@@ -109,12 +116,14 @@ describe("browser OIDC session lifecycle", () => {
 
 		await takeOverBrowserSession();
 		let channelMessages = 0;
-		const channel = createBrowserTauriClient().createChannel(() => channelMessages++);
-		(channel as unknown as { onmessage: (message: unknown) => void }).onmessage({ value: "before" });
+		const createChannel = createBrowserTauriClient().createChannel;
+		if (!createChannel) throw new Error("Browser client must support channels");
+		const channel = createChannel<{ value: string }>(() => channelMessages++);
+		channel.onmessage({ value: "before" });
 		expect(channelMessages).toBe(1);
 
 		await signOutBrowserSession();
-		(channel as unknown as { onmessage: (message: unknown) => void }).onmessage({ value: "after" });
+		channel.onmessage({ value: "after" });
 		expect(channelMessages).toBe(1);
 		expect(getBrowserSessionState()).toMatchObject({ status: "login", authenticationMode: "oidc" });
 		expect(storage.has("kubecove-browser-resume")).toBe(false);

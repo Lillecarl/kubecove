@@ -404,7 +404,7 @@ mod tests {
             .read_to_end(&mut trailing)
             .await
             .expect("server closes idle stream");
-        assert!(trailing.is_empty());
+        assert_eq!(trailing.as_slice(), b"");
         assert!(connection.tunnel_senders.lock().unwrap().is_empty());
         // A pod-side close or error must close the laptop reader even while its
         // write half remains open. Echo-only fixtures cannot prove these paths.
