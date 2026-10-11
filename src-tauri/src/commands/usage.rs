@@ -73,9 +73,9 @@ impl AppUsageMonitor {
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_app_usage_metrics(
-    monitor: tauri::State<'_, AppUsageMonitor>,
+    monitor: crate::runtime::State<'_, AppUsageMonitor>,
 ) -> Result<AppUsageMetrics, AppError> {
     monitor.sample()
 }

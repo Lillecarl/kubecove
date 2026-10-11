@@ -15,11 +15,11 @@ use crate::models::{
     AppError, DiscoveredResourceKind, OwnerReferenceSummary, ResourceSummary, ResourceTopology,
     TopologyEdge, TopologyNode, TopologyRelation,
 };
+use crate::runtime::State;
 use chrono::{TimeZone, Utc};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
-use tauri::State;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TopologyInputResource {
@@ -353,7 +353,7 @@ pub async fn resource_topology_from(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_resource_topology(
     cluster_context: String,
     namespaces: Vec<String>,

@@ -10,9 +10,9 @@ use crate::commands::ClusterLiveStore;
 use crate::models::{
     AggregatedLogStreamRequest, AppError, PodLogStreamRequest, StreamMessage, WatchResourceKey,
 };
+use crate::runtime::{Channel, State};
 use kube::Client;
 pub use registry::StreamRegistry;
-use tauri::{ipc::Channel, State};
 
 fn send(channel: &Channel<StreamMessage>, message: StreamMessage) -> bool {
     channel.send(message).is_ok()
@@ -132,7 +132,7 @@ fn validate_aggregated_log_stream_request(
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn refresh_resource_cache(
     cluster_context: String,
     mut keys: Vec<WatchResourceKey>,
@@ -160,7 +160,7 @@ pub async fn refresh_resource_cache(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn start_resource_watch(
     cluster_context: String,
     keys: Vec<WatchResourceKey>,
@@ -181,7 +181,7 @@ pub async fn start_resource_watch(
             channel.clone(),
         );
         if should_start {
-            let handle = tauri::async_runtime::spawn(watch::run_resource_watch(
+            let handle = crate::runtime::spawn(watch::run_resource_watch(
                 source_key.clone(),
                 cluster_context.clone(),
                 key,
@@ -202,7 +202,7 @@ pub async fn start_resource_watch(
     Ok(stream_id)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn start_resource_event_watch(
     cluster_context: String,
     kind: String,
@@ -226,7 +226,7 @@ pub async fn start_resource_event_watch(
         channel.clone(),
     );
     if should_start {
-        let handle = tauri::async_runtime::spawn(watch::run_event_watch(
+        let handle = crate::runtime::spawn(watch::run_event_watch(
             cluster_context,
             kind,
             name,
@@ -246,7 +246,7 @@ pub async fn start_resource_event_watch(
     Ok(stream_id)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn start_pod_log_stream(
     request: PodLogStreamRequest,
     channel: Channel<StreamMessage>,
@@ -254,7 +254,7 @@ pub async fn start_pod_log_stream(
 ) -> Result<String, AppError> {
     validate_pod_log_stream_request(&request)?;
     let stream_id = registry.stream_id("logs");
-    let handle = tauri::async_runtime::spawn(logs::run_pod_log_stream(
+    let handle = crate::runtime::spawn(logs::run_pod_log_stream(
         stream_id.clone(),
         request,
         channel.clone(),
@@ -270,7 +270,7 @@ pub async fn start_pod_log_stream(
     Ok(stream_id)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn start_aggregated_log_stream(
     request: AggregatedLogStreamRequest,
     channel: Channel<StreamMessage>,
@@ -278,7 +278,7 @@ pub async fn start_aggregated_log_stream(
 ) -> Result<String, AppError> {
     validate_aggregated_log_stream_request(&request)?;
     let stream_id = registry.stream_id("logs");
-    let handle = tauri::async_runtime::spawn(aggregate_logs::run_aggregated_log_stream(
+    let handle = crate::runtime::spawn(aggregate_logs::run_aggregated_log_stream(
         stream_id.clone(),
         request,
         channel.clone(),
@@ -294,7 +294,7 @@ pub async fn start_aggregated_log_stream(
     Ok(stream_id)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn stop_stream(
     stream_id: String,
     registry: State<'_, StreamRegistry>,

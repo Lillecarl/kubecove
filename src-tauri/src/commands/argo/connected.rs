@@ -3,6 +3,7 @@ use super::transport::{
     argo_url, http_client, normalize_endpoint, response_json, safe_http_error, url,
 };
 use super::{
+    credential_store::{active_store, ARGO_CREDENTIAL_SERVICE},
     scope::scoped_connection,
     tunnel::{verify_confirmed_target, ArgoServiceTunnel},
 };
@@ -254,37 +255,26 @@ trait CredentialStore {
     fn delete(&self, key: &str) -> Result<(), AppError>;
 }
 
+struct ActiveCredentialStore;
+impl CredentialStore for ActiveCredentialStore {
+    fn read(&self, key: &str) -> Result<Option<String>, AppError> {
+        active_store().read(ARGO_CREDENTIAL_SERVICE, key)
+    }
+    fn write(&self, key: &str, value: &str) -> Result<(), AppError> {
+        active_store().write(ARGO_CREDENTIAL_SERVICE, key, value)
+    }
+    fn delete(&self, key: &str) -> Result<(), AppError> {
+        active_store().delete(ARGO_CREDENTIAL_SERVICE, key)
+    }
+}
+
+#[cfg(test)]
 fn credential_error(error: keyring::Error) -> AppError {
     AppError::new(
         "native credential storage unavailable",
         AppErrorKind::CredentialUnavailable,
     )
     .with_source(error)
-}
-
-struct KeyringCredentialStore;
-impl CredentialStore for KeyringCredentialStore {
-    fn read(&self, key: &str) -> Result<Option<String>, AppError> {
-        let entry = keyring::Entry::new("KubeCove Argo CD", key).map_err(credential_error)?;
-        match entry.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(credential_error(error)),
-        }
-    }
-    fn write(&self, key: &str, value: &str) -> Result<(), AppError> {
-        keyring::Entry::new("KubeCove Argo CD", key)
-            .map_err(credential_error)?
-            .set_password(value)
-            .map_err(credential_error)
-    }
-    fn delete(&self, key: &str) -> Result<(), AppError> {
-        let entry = keyring::Entry::new("KubeCove Argo CD", key).map_err(credential_error)?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(credential_error(error)),
-        }
-    }
 }
 
 fn load_credential(
@@ -477,9 +467,9 @@ fn tunnel_target_unavailable(error: &AppError) -> ArgoServiceTunnelUnavailableRe
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn discover_argo_servers(
-    cancellations: tauri::State<'_, BackendCancellationRegistry>,
+    cancellations: crate::runtime::State<'_, BackendCancellationRegistry>,
     cluster_context: String,
     kubeconfig_env_var: Option<String>,
     request_id: Option<String>,
@@ -532,9 +522,9 @@ pub async fn discover_argo_servers(
         .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn connect_argo_server(
-    store: tauri::State<'_, ArgoConnectionStore>,
+    store: crate::runtime::State<'_, ArgoConnectionStore>,
     id: String,
     server_url: String,
     endpoint: Option<ArgoServerEndpoint>,
@@ -609,7 +599,7 @@ pub async fn connect_argo_server(
             .as_ref()
             .map(|(host, address)| (host.as_str(), *address)),
     )?;
-    let credential_store = KeyringCredentialStore;
+    let credential_store = ActiveCredentialStore;
     let submitted_token = token.filter(|value| !value.is_empty());
     let stored = if remember_credential {
         load_credential(&credential_store, &profile)?
@@ -711,9 +701,9 @@ pub async fn connect_argo_server(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_argo_connection_status(
-    store: tauri::State<'_, ArgoConnectionStore>,
+    store: crate::runtime::State<'_, ArgoConnectionStore>,
     id: String,
 ) -> Result<ArgoConnectionStatus, AppError> {
     let connection = store
@@ -743,17 +733,17 @@ pub fn get_argo_connection_status(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn disconnect_argo_server(
-    store: tauri::State<'_, ArgoConnectionStore>,
+    store: crate::runtime::State<'_, ArgoConnectionStore>,
     id: String,
 ) -> Result<(), AppError> {
     store.remove_connection(&id).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn forget_argo_credential(profile: ArgoConnectionProfile) -> Result<(), AppError> {
-    delete_credential(&KeyringCredentialStore, &profile)
+    delete_credential(&ActiveCredentialStore, &profile)
 }
 
 pub(crate) fn text(object: &Value, field: &str) -> Option<String> {
@@ -1199,10 +1189,10 @@ async fn application_inspector(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_argo_application_inspector(
-    store: tauri::State<'_, ArgoConnectionStore>,
-    cancellations: tauri::State<'_, BackendCancellationRegistry>,
+    store: crate::runtime::State<'_, ArgoConnectionStore>,
+    cancellations: crate::runtime::State<'_, BackendCancellationRegistry>,
     cluster_context: String,
     kubeconfig_env_var: Option<String>,
     connection_id: Option<String>,

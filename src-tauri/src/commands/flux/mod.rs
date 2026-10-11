@@ -124,7 +124,7 @@ pub(crate) const FLUX_KINDS: &[(&str, &str, &str, &str, bool, &str)] = &[
     ),
 ];
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn detect_flux(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,
@@ -147,7 +147,7 @@ pub async fn detect_flux(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_flux_resources(
     cluster_context: String,
     resource_kind: FluxResourceKind,
@@ -166,7 +166,7 @@ pub async fn list_flux_resources(
         .collect())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_flux_resource_details(
     cluster_context: String,
     resource_kind: FluxResourceKind,

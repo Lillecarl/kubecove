@@ -15,7 +15,9 @@ use std::{
     sync::{OnceLock, RwLock},
     time::Duration,
 };
+#[cfg(feature = "desktop")]
 use tauri::AppHandle;
+#[cfg(feature = "desktop")]
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 pub const DEFAULT_KUBECONFIG_ENV_VAR: &str = "KUBECONFIG";
@@ -396,12 +398,12 @@ pub fn init_kubeconfig_settings_path(app_config_dir: PathBuf) {
     let _ = SETTINGS_PATH.set(app_config_dir.join(SETTINGS_FILE_NAME));
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_kubeconfig_sources() -> Result<KubeconfigSourcesSummary, AppError> {
     kubeconfig_sources_summary()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_kubeconfig_env_var(env_var: String) -> Result<KubeconfigSourcesSummary, AppError> {
     let mut settings = load_persisted_sources()?;
     let normalized = normalize_env_var(Some(&env_var));
@@ -411,7 +413,7 @@ pub fn set_kubeconfig_env_var(env_var: String) -> Result<KubeconfigSourcesSummar
     kubeconfig_sources_summary()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_show_kubeconfig_source_labels(show: bool) -> Result<KubeconfigSourcesSummary, AppError> {
     let mut settings = load_persisted_sources()?;
     settings.show_source_labels = show;
@@ -419,7 +421,7 @@ pub fn set_show_kubeconfig_source_labels(show: bool) -> Result<KubeconfigSources
     kubeconfig_sources_summary()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_kubeconfig_paths(paths: Vec<String>) -> Result<KubeconfigSourcesSummary, AppError> {
     let mut settings = load_persisted_sources()?;
     settings.paths = append_unique_paths(settings.paths, parse_path_input(paths));
@@ -427,7 +429,7 @@ pub fn add_kubeconfig_paths(paths: Vec<String>) -> Result<KubeconfigSourcesSumma
     kubeconfig_sources_summary()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_kubeconfig_path(path: String) -> Result<KubeconfigSourcesSummary, AppError> {
     let mut settings = load_persisted_sources()?;
     settings.paths.retain(|candidate| candidate != &path);
@@ -435,7 +437,7 @@ pub fn remove_kubeconfig_path(path: String) -> Result<KubeconfigSourcesSummary, 
     kubeconfig_sources_summary()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn reorder_kubeconfig_paths(paths: Vec<String>) -> Result<KubeconfigSourcesSummary, AppError> {
     let mut settings = load_persisted_sources()?;
     let existing = settings.paths.iter().cloned().collect::<HashSet<_>>();
@@ -453,6 +455,7 @@ pub fn reorder_kubeconfig_paths(paths: Vec<String>) -> Result<KubeconfigSourcesS
     kubeconfig_sources_summary()
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn pick_kubeconfig_paths(app: AppHandle) -> Result<KubeconfigSourcesSummary, AppError> {
     let Some(paths) = app
@@ -676,6 +679,7 @@ fn append_unique_paths(existing: Vec<String>, additions: Vec<String>) -> Vec<Str
     paths
 }
 
+#[cfg(feature = "desktop")]
 fn file_path_to_string(file_path: FilePath) -> Option<String> {
     file_path
         .into_path()

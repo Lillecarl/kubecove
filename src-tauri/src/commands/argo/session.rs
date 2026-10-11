@@ -1,3 +1,4 @@
+use super::credential_store::{active_store, SecureStore as SharedSecureStore, SESSION_SERVICE};
 use crate::models::AppErrorKind;
 use crate::models::{AppError, ArgoApplicationRef, ArgoOperationRequest};
 use serde::{Deserialize, Serialize};
@@ -8,8 +9,27 @@ use std::{
 };
 use uuid::Uuid;
 
+pub(crate) trait SecureStore: Send + Sync {
+    fn read(&self, id: &str) -> Result<Option<String>, AppError>;
+    fn write(&self, id: &str, value: &str) -> Result<(), AppError>;
+    fn delete(&self, id: &str) -> Result<(), AppError>;
+}
+
+struct SessionCredentialStore(Arc<dyn SharedSecureStore>);
+
+impl SecureStore for SessionCredentialStore {
+    fn read(&self, id: &str) -> Result<Option<String>, AppError> {
+        self.0.read(SESSION_SERVICE, id)
+    }
+    fn write(&self, id: &str, value: &str) -> Result<(), AppError> {
+        self.0.write(SESSION_SERVICE, id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), AppError> {
+        self.0.delete(SESSION_SERVICE, id)
+    }
+}
+
 pub const SESSION_TTL: Duration = Duration::from_mins(5);
-const SERVICE: &str = "KubeCove Argo operation sessions";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,35 +45,6 @@ pub(crate) struct OperationSession {
     pub(crate) connection_instance_id: Option<String>,
 }
 
-pub(crate) trait SecureStore: Send + Sync {
-    fn read(&self, id: &str) -> Result<Option<String>, AppError>;
-    fn write(&self, id: &str, value: &str) -> Result<(), AppError>;
-    fn delete(&self, id: &str) -> Result<(), AppError>;
-}
-
-struct KeyringStore;
-impl SecureStore for KeyringStore {
-    fn read(&self, id: &str) -> Result<Option<String>, AppError> {
-        let entry = key(id)?;
-        match entry.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(unavailable().with_source(error)),
-        }
-    }
-    fn write(&self, id: &str, value: &str) -> Result<(), AppError> {
-        key(id)?
-            .set_password(value)
-            .map_err(|error| unavailable().with_source(error))
-    }
-    fn delete(&self, id: &str) -> Result<(), AppError> {
-        match key(id)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(unavailable().with_source(error)),
-        }
-    }
-}
-
 pub(crate) struct SessionStore {
     pub(crate) records: Mutex<HashMap<String, OperationSession>>,
     consumed: Mutex<std::collections::HashSet<String>>,
@@ -65,7 +56,7 @@ impl Default for SessionStore {
         Self {
             records: Mutex::new(HashMap::new()),
             consumed: Mutex::new(std::collections::HashSet::new()),
-            secure: Arc::new(KeyringStore),
+            secure: Arc::new(SessionCredentialStore(active_store())),
         }
     }
 }
@@ -83,16 +74,6 @@ fn now() -> u64 {
         .as_secs()
 }
 
-fn key(id: &str) -> Result<keyring::Entry, AppError> {
-    keyring::Entry::new(SERVICE, id).map_err(|error| {
-        AppError::new(
-            "native credential storage unavailable",
-            AppErrorKind::CredentialUnavailable,
-        )
-        .with_source(error)
-    })
-}
-
 fn state_error() -> AppError {
     AppError::new(
         "Argo CD operation state unavailable",
@@ -100,6 +81,7 @@ fn state_error() -> AppError {
     )
 }
 
+#[cfg(test)]
 fn unavailable() -> AppError {
     AppError::new(
         "native credential storage unavailable",
@@ -201,6 +183,8 @@ pub(crate) fn peek(
     }
     let (session, fingerprint) = load(store, id)?;
     if session.expires_at <= now_override.unwrap_or_else(now) {
+        store.records.lock().map_err(|_| state_error())?.remove(id);
+        store.secure.delete(id)?;
         return Err(AppError::new(
             "operation session expired",
             AppErrorKind::ArgoOperationUnavailable,
@@ -263,6 +247,8 @@ pub(crate) fn consume(
     }
     let consumed_at = now();
     if record.expires_at <= consumed_at {
+        records.remove(id);
+        store.secure.delete(id)?;
         return Err(AppError::new(
             "operation session expired",
             AppErrorKind::ArgoOperationUnavailable,

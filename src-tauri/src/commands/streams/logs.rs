@@ -1,9 +1,9 @@
 use super::{client_for_context, send};
 use crate::models::{LogLineSource, PodLogStreamRequest, StreamMessage};
+use crate::runtime::Channel;
 use futures_util::{io::AsyncBufRead, AsyncBufReadExt};
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, LogParams};
-use tauri::ipc::Channel;
 
 pub(super) async fn run_pod_log_stream(
     stream_id: String,

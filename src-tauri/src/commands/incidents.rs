@@ -11,13 +11,13 @@ use crate::models::{
     AppError, IncidentCockpitItem, IncidentCockpitSummary, IncidentSeverity, IncidentSignalState,
     IncidentSignalSummary, ResourceEventSummary, ResourceListRequest, ResourceSummary,
 };
+use crate::runtime::State;
 use chrono::{DateTime, Utc};
 use futures_util::future::join_all;
 use k8s_openapi::api::core::v1::Event;
 use kube::{api::Api, Client};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
-use tauri::State;
 
 use health::{
     apply_incident_health_evidence, current_status_severity, has_current_kubernetes_concern,
@@ -31,7 +31,7 @@ use restarts::{
 const MAX_WARNING_EVENTS_PER_RESOURCE: usize = 3;
 const MAX_WARNING_EVENTS_TOTAL: usize = 500;
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_incident_cockpit(
     cluster_context: String,
     requests: Vec<ResourceListRequest>,

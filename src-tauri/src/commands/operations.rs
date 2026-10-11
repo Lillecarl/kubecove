@@ -8,7 +8,7 @@ use crate::models::{
 use kube::api::{Api, ApiResource, DeleteParams, DynamicObject, Patch, PatchParams};
 use serde_json::json;
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn preview_scale_workload(
     request: ScaleWorkloadRequest,
 ) -> Result<ClusterOperationPreview, AppError> {
@@ -31,7 +31,7 @@ pub async fn preview_scale_workload(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn scale_workload(
     request: ScaleWorkloadRequest,
 ) -> Result<ClusterOperationResult, AppError> {
@@ -55,7 +55,7 @@ pub async fn scale_workload(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn preview_rollout_restart(
     request: RolloutRestartRequest,
 ) -> Result<ClusterOperationPreview, AppError> {
@@ -76,7 +76,7 @@ pub async fn preview_rollout_restart(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn rollout_restart(
     request: RolloutRestartRequest,
 ) -> Result<ClusterOperationResult, AppError> {
@@ -95,7 +95,7 @@ pub async fn rollout_restart(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn preview_delete_resource(
     request: DeleteResourceRequest,
 ) -> Result<ClusterOperationPreview, AppError> {
@@ -110,7 +110,7 @@ pub async fn preview_delete_resource(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn delete_resource(
     request: DeleteResourceRequest,
 ) -> Result<ClusterOperationResult, AppError> {

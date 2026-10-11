@@ -71,7 +71,7 @@ pub(super) struct HelmStorageRecord {
     pub(super) manifest_resources: Vec<HelmManifestResourceSummary>,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_helm_releases(
     cluster_context: String,
     kubeconfig_env_var: Option<String>,
@@ -150,7 +150,7 @@ async fn list_helm_releases_with_client(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn get_helm_release_details(
     cluster_context: String,
     namespace: String,

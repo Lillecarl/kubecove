@@ -1,4 +1,5 @@
 use crate::models::{StreamMessage, WatchResourceKey, WatchResourceTarget};
+use crate::runtime::{Channel, JoinHandle};
 use std::{
     collections::HashMap,
     sync::{
@@ -6,7 +7,6 @@ use std::{
         Arc, Mutex,
     },
 };
-use tauri::{async_runtime::JoinHandle, ipc::Channel};
 
 #[derive(Clone)]
 pub(super) struct StreamBroadcaster {
@@ -159,6 +159,21 @@ pub struct StreamRegistry {
 }
 
 impl StreamRegistry {
+    /// Stop every subscription when its host session ends.
+    pub fn stop_all(&self) {
+        let ids = self
+            .state
+            .lock()
+            .expect("stream registry lock")
+            .streams
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in ids {
+            self.stop(&id);
+        }
+    }
+
     pub(super) fn stream_id(&self, prefix: &str) -> String {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         format!("{prefix}-{id}")
