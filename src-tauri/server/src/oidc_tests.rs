@@ -268,6 +268,94 @@ async fn state_cookie_is_browser_bound_and_authorization_code_replay_fails() {
         .any(|value| value.to_str().unwrap().contains("Max-Age=0")));
 }
 
+// The forwarded bearer is process-wide, so one test walks the whole lifecycle.
+#[tokio::test]
+async fn forwarded_id_token_follows_owner_refresh_and_revocation() {
+    use kubecove_lib::commands::forwarded_bearer;
+    let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+        .await
+        .unwrap();
+    provider.set_claim_mode(mock::ClaimMode::ShortLived);
+    let (headers, callback) = pending_callback(&oidc).await;
+    let response = oidc.callback(&headers, callback).await.unwrap();
+    let cookie = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with(AUTH_COOKIE))
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let mut headers = HeaderMap::new();
+    headers.insert(header::COOKIE, cookie.parse().unwrap());
+    let session = oidc.verify(&headers).unwrap();
+    // The session outlives the two-second ID token.
+    assert!(session.identity.expires_at > Instant::now() + Duration::from_hours(1));
+
+    // The login token expires inside the refresh margin, so activation renews it.
+    oidc.activate(&session.credential, "owner-1").await.unwrap();
+    assert_eq!(provider.refreshes(), 1);
+    let first = forwarded_bearer().unwrap();
+    assert!(first.starts_with("Bearer ey"));
+
+    oidc.release_owner("owner-0");
+    assert_eq!(forwarded_bearer().as_deref(), Some(first.as_str()));
+    oidc.release_owner("owner-1");
+    assert_eq!(forwarded_bearer(), None);
+
+    oidc.activate(&session.credential, "owner-2").await.unwrap();
+    assert_eq!(provider.refreshes(), 2);
+    assert_ne!(forwarded_bearer().unwrap(), first);
+
+    // A refusal while the token still works keeps the session.
+    provider.set_claim_mode(mock::ClaimMode::RefreshRefused);
+    oidc.ensure_fresh(&session.credential.0).await.unwrap();
+    assert!(forwarded_bearer().is_some());
+
+    // A refusal after it expired revokes the sign-in and stops forwarding.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(oidc.ensure_fresh(&session.credential.0).await.is_err());
+    assert!(session.revoked.is_cancelled());
+    assert!(oidc.verify(&headers).is_err());
+    assert_eq!(forwarded_bearer(), None);
+}
+
+#[tokio::test]
+async fn forwarding_requires_the_kubernetes_audience_and_trusts_no_other() {
+    let (oidc, provider) = mock::fixture_with("http://localhost:43136", Some("kubernetes"))
+        .await
+        .unwrap();
+    for (mode, signs_in) in [
+        (mock::ClaimMode::Valid, true),
+        (mock::ClaimMode::WithoutExtraAudience, false),
+        (mock::ClaimMode::MultiAudience, false),
+    ] {
+        provider.set_claim_mode(mode);
+        let (headers, callback) = pending_callback(&oidc).await;
+        let response = oidc.callback(&headers, callback).await.unwrap();
+        assert_eq!(
+            response.status() == StatusCode::SEE_OTHER,
+            signs_in,
+            "{mode:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sign_in_without_forwarding_keeps_no_tokens_and_ends_with_the_id_token() {
+    let (oidc, _provider) = mock::fixture("http://localhost:43135").await.unwrap();
+    let (headers, callback) = pending_callback(&oidc).await;
+    let response = oidc.callback(&headers, callback).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let credentials = oidc.credentials.lock().unwrap();
+    let credential = credentials.values().next().unwrap();
+    assert!(credential.tokens.is_none());
+    assert!(credential.expires_unix <= unix_now() + 300);
+}
+
 async fn pending_callback(oidc: &Oidc) -> (HeaderMap, Callback) {
     let start = oidc.start(&HeaderMap::new()).unwrap();
     let cookie = start

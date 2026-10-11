@@ -136,6 +136,7 @@ async fn guard(
                     request
                         .extensions_mut()
                         .insert(AuthenticationRevoked(session.revoked));
+                    request.extensions_mut().insert(session.credential);
                 }
                 Err(error) => return error.into_response(),
             }
@@ -289,6 +290,7 @@ struct Login {
 async fn login(
     State(state): State<Arc<AppState>>,
     identity: Option<Extension<AccessIdentity>>,
+    credential: Option<Extension<oidc::OidcCredential>>,
     headers: HeaderMap,
     payload: Result<Json<Login>, JsonRejection>,
 ) -> Result<Response, ApiError> {
@@ -314,6 +316,19 @@ async fn login(
             access_subject(identity.as_ref()),
         )
         .await?;
+    // Activated after authenticate_as has ended and cleaned up any previous
+    // owner, and cleared when this owner ends for any reason.
+    if let (Some(oidc), Some(Extension(credential))) = (&state.oidc, credential) {
+        if oidc.forwards_credentials() {
+            let owner = state.sessions.owner(&session.resume_token).await?;
+            oidc.activate(&credential, &owner.resume_token).await?;
+            let oidc = Arc::clone(oidc);
+            tokio::spawn(async move {
+                owner.ended.cancelled().await;
+                oidc.release_owner(&owner.resume_token);
+            });
+        }
+    }
     let mut session = serde_json::to_value(session).map_err(|_| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
