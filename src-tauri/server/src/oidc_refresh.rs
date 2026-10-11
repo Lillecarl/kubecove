@@ -142,7 +142,18 @@ impl Oidc {
     }
 
     pub(crate) async fn ensure_fresh(&self, credential: &str) -> Result<(), ApiError> {
-        let _refreshing = self.refreshing.lock().await;
+        let refreshing = {
+            let mut credentials = self.credentials.lock().map_err(|_| oidc_unavailable())?;
+            self.prune_expired(&mut credentials);
+            Arc::clone(
+                &credentials
+                    .get(credential)
+                    .ok_or_else(invalid_auth)?
+                    .refreshing,
+            )
+        };
+        // Serialize rotation for this sign-in, without blocking other users.
+        let _refreshing = refreshing.lock().await;
         let tokens = {
             let mut credentials = self.credentials.lock().map_err(|_| oidc_unavailable())?;
             self.prune_expired(&mut credentials);

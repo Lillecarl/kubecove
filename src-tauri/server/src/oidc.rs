@@ -123,7 +123,6 @@ pub struct Oidc {
     /// The open sessions, each with the sign-in whose ID token its
     /// Kubernetes requests carry.
     bound: Mutex<Vec<Binding>>,
-    refreshing: tokio::sync::Mutex<()>,
     allow_http_test: bool,
 }
 
@@ -132,6 +131,7 @@ struct Credential {
     expires_unix: u64,
     revoked: CancellationToken,
     tokens: Option<Tokens>,
+    refreshing: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Clone)]
@@ -210,7 +210,6 @@ impl Oidc {
             transaction_key,
             credentials: Mutex::new(HashMap::new()),
             bound: Mutex::new(Vec::new()),
-            refreshing: tokio::sync::Mutex::new(()),
             allow_http_test: false,
         })
     }
@@ -306,6 +305,7 @@ impl Oidc {
             expires_unix: exp,
             revoked: CancellationToken::new(),
             tokens,
+            refreshing: Arc::default(),
         };
         let mut credentials = self.credentials.lock().map_err(|_| oidc_unavailable())?;
         self.prune_expired(&mut credentials);
@@ -471,7 +471,6 @@ impl Oidc {
             transaction_key: key,
             credentials: Mutex::new(HashMap::new()),
             bound: Mutex::new(Vec::new()),
-            refreshing: tokio::sync::Mutex::new(()),
             allow_http_test: true,
         })
     }
@@ -490,6 +489,7 @@ impl Oidc {
                 expires_unix: exp,
                 revoked: CancellationToken::new(),
                 tokens: None,
+                refreshing: Arc::default(),
             },
         );
         token

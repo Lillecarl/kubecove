@@ -196,7 +196,6 @@ pub(crate) async fn fixture_with(
         transaction_key,
         credentials: Mutex::new(HashMap::new()),
         bound: Mutex::new(Vec::new()),
-        refreshing: tokio::sync::Mutex::new(()),
         allow_http_test: true,
     };
     Ok((

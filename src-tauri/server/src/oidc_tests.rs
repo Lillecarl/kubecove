@@ -158,6 +158,41 @@ async fn unusable_refresh_retains_rotation_for_recovery() {
 }
 
 #[tokio::test]
+async fn a_slow_refresh_does_not_block_another_sign_in() {
+    use futures_util::FutureExt;
+    let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+        .await
+        .unwrap();
+    let (_, alice) = signed_in(&oidc).await;
+    let (_, bob) = signed_in(&oidc).await;
+    oidc.credentials
+        .lock()
+        .unwrap()
+        .get_mut(&alice.credential.0)
+        .unwrap()
+        .tokens
+        .as_mut()
+        .unwrap()
+        .id_expires_unix = unix_now();
+    let gate = provider.refresh_gate.lock().await;
+    let mut renewal = Box::pin(oidc.ensure_fresh(&alice.credential.0));
+    tokio::select! {
+        () = provider.refresh_started.notified() => {},
+        _ = &mut renewal => panic!("Alice's renewal must wait for the provider"),
+    }
+    let scope = SessionScope::new(None);
+    assert!(
+        oidc.activate(&bob.credential, "bob-owner", Arc::clone(&scope))
+            .now_or_never()
+            .is_some_and(|result| result.is_ok()),
+        "Bob's valid sign-in must bind while Alice waits for refresh"
+    );
+    assert!(scope.bearer().is_some());
+    drop(gate);
+    renewal.await.unwrap();
+}
+
+#[tokio::test]
 async fn close_during_resume_cannot_restore_session_credentials() {
     use axum::{extract::State, Extension};
     use futures_util::FutureExt;
@@ -196,7 +231,8 @@ async fn close_during_resume_cannot_restore_session_credentials() {
     let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let resume = info["resumeToken"].as_str().unwrap().to_owned();
     let owner = state.sessions.owner(&resume).await.unwrap();
-    let refreshing = oidc.refreshing.lock().await;
+    let refresh_gate = Arc::clone(&oidc.credentials.lock().unwrap()[&auth.credential.0].refreshing);
+    let refreshing = refresh_gate.lock().await;
     let mut resuming = Box::pin(crate::login(
         State(Arc::clone(&state)),
         Some(Extension(auth.identity.clone())),
