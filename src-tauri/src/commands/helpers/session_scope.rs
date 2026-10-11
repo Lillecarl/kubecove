@@ -57,6 +57,13 @@ impl SessionScope {
         CURRENT.scope(self, future).await
     }
 
+    /// Runs `f` with this scope as the current one. State that captures the
+    /// scope when it is built, such as the Argo CD review store, must be
+    /// built inside it.
+    pub fn run_sync<R>(self: Arc<Self>, f: impl FnOnce() -> R) -> R {
+        CURRENT.sync_scope(self, f)
+    }
+
     /// The scope the calling task runs in, if any.
     pub fn current() -> Option<Arc<Self>> {
         CURRENT.try_with(Arc::clone).ok()

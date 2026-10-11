@@ -28,6 +28,9 @@ impl Default for BackendState {
 
 impl BackendState {
     pub fn new(scope: Arc<SessionScope>) -> Self {
+        // The Argo CD review store takes its secure store when built, so it
+        // is built in the scope that namespaces that store.
+        let argo = Arc::clone(&scope).run_sync(ArgoConnectionStore::default);
         Self {
             live_store: ClusterLiveStore::default(),
             cancellation: BackendCancellationRegistry::default(),
@@ -35,7 +38,7 @@ impl BackendState {
             port_forwards: PortForwardRegistry::default(),
             pod_exec: PodExecRegistry::default(),
             usage: AppUsageMonitor::default(),
-            argo: ArgoConnectionStore::default(),
+            argo,
             scope,
         }
     }
