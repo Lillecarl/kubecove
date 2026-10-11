@@ -2,7 +2,7 @@
 
 [![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/Timpan4/kubecove?utm_source=badge)
 
-KubeCove is a fast, local Kubernetes desktop UI—a Kubernetes GUI for cluster inspection, GitOps, and troubleshooting. It is built for application developers and cluster operators who want to browse resources across kubeconfig contexts and namespaces, understand ownership and topology, inspect Argo CD, Flux, and Helm state, and use guarded cluster operations without leaving the local workspace.
+KubeCove is a fast Kubernetes workspace for cluster inspection, GitOps, and troubleshooting. Use the desktop app locally, or run its single-user headless server on a remote host that already has kubeconfig access. It is built for application developers and cluster operators who want to browse resources across contexts and namespaces, understand ownership and topology, inspect Argo CD, Flux, and Helm state, and use guarded cluster operations.
 
 KubeCove is a calm, evidence-oriented workspace: see what is running, what owns it, and what is broken before acting.
 
@@ -42,19 +42,20 @@ These tools remain useful. KubeCove is a local Kubernetes workspace for the part
 
 ## Security and local operation
 
-KubeCove is a Tauri desktop application. The Svelte frontend reaches Kubernetes through typed Tauri commands and the Rust backend:
+KubeCove has a Tauri desktop app and a separate `kubecove-server` for single-user remote-host access. The Svelte frontend uses typed Tauri commands locally; remote clients use authenticated HTTP and WebSocket adapters over the same Rust command surface.
 
 - Kubeconfig contents, tokens, client keys, and certificate data remain backend-side rather than becoming normal frontend state.
 - The application deploys no cluster agent and exposes no generic local-shell bridge. Pod exec is a specific, target-scoped workflow.
-- Cluster-changing actions identify one exact target and require explicit confirmation. Port forwards bind to loopback.
-- Connected Argo CD credentials are session-only unless the user explicitly chooses the native operating-system keyring.
+- Cluster-changing actions identify one exact target and require explicit confirmation. Port forwards bind to loopback on the client or server host.
+- Connected Argo CD credentials and operation review sessions use native credential storage when available. The headless Unix server can use the protected encrypted file store in [ADR 0021](docs/decisions/0021-file-credential-store-without-keyring.md) when native storage is unavailable.
+- The headless server has one active owner. It can run on a remote host or as an operator-built container in Kubernetes. Each server uses one sign-in mode: a per-start token, Cloudflare Access, or OIDC. Browsers support all three; the desktop remote client supports token mode. Signed-in users share the server's Kubernetes credentials. Non-loopback TCP requires explicit remote mode and TLS. The [container and k0s example](deploy/README.md) uses a dedicated read-only account and private port forwarding.
 
 ## Getting started
 
 1. [Download an installer from the latest release](https://github.com/Timpan4/kubecove/releases/latest).
 2. Make a readable Kubernetes context available through `$KUBECONFIG` or the standard default kubeconfig location.
 3. Launch KubeCove, create a workspace, choose a context, and narrow namespaces or resource kinds when useful.
-4. Follow the [installation and first-use guide](https://github.com/Timpan4/kubecove/wiki/Install-and-Update) for platform notes and the [public Wiki](https://github.com/Timpan4/kubecove/wiki) for task guides.
+4. Follow the [installation and first-use guide](https://github.com/Timpan4/kubecove/wiki/Install-and-Update) for platform notes and the [public Wiki](https://github.com/Timpan4/kubecove/wiki) for task guides. To keep cluster access on a remote operations host, see [Run KubeCove on a remote host](https://github.com/Timpan4/kubecove/wiki/Remote-Server).
 
 On Linux with Nix, run a checkout directly:
 
@@ -81,6 +82,7 @@ Installers are beta builds and may show platform trust prompts. KubeCove does no
 ## Documentation
 
 - [Getting started and downloading](https://github.com/Timpan4/kubecove/wiki/Install-and-Update)
+- [Run KubeCove on a remote host](https://github.com/Timpan4/kubecove/wiki/Remote-Server)
 - [Kubernetes resource browser and topology](https://github.com/Timpan4/kubecove/wiki/Resource-Browser)
 - [Argo CD and Flux integration](https://github.com/Timpan4/kubecove/wiki/GitOps-Argo-CD-and-Flux)
 - [Helm inspection and reconciliation](https://github.com/Timpan4/kubecove/wiki/Helm-Reconciliation)

@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubecove
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubecove
+  namespace: kubecove
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubecove-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: kubecove
+    namespace: kubecove
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubecove-kubeconfig
+  namespace: kubecove
+data:
+  config: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: in-cluster
+        cluster:
+          server: https://kubernetes.default.svc
+          certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    contexts:
+      - name: in-cluster
+        context:
+          cluster: in-cluster
+          user: kubecove
+          namespace: default
+    current-context: in-cluster
+    users:
+      - name: kubecove
+        user:
+          tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubecove
+  namespace: kubecove
+spec:
+  # One process owns the session and writes this data directory.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubecove
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubecove
+    spec:
+      serviceAccountName: kubecove
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/os: linux
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        # Preserve the server's private 0700 child directory on pod replacement.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubecove
+          # Replace with the image you built and pushed to your registry.
+          image: kubecove-server:local
+          imagePullPolicy: IfNotPresent
+          # Startup stdout contains the login token. Read its private file instead.
+          command: [/bin/sh, -ec]
+          args:
+            - 'exec /usr/local/bin/kubecove-server "$@" >/dev/null'
+            - kubecove-server
+            - --listen
+            - 127.0.0.1:8080
+            - --data-dir
+            - /data/kubecove
+            - --public-origin
+            - http://localhost:8080
+          env:
+            - name: KUBECONFIG
+              value: /etc/kubecove/config
+            - name: XDG_CACHE_HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: temporary
+              mountPath: /tmp
+            - name: kubeconfig
+              mountPath: /etc/kubecove
+              readOnly: true
+            - name: service-account
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kubecove-data
+        - name: temporary
+          emptyDir: {}
+        - name: kubeconfig
+          configMap:
+            name: kubecove-kubeconfig
+        - name: service-account
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt

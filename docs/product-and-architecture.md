@@ -1,6 +1,6 @@
 # Product and architecture
 
-KubeCove is a local Kubernetes desktop GUI for cluster inspection, GitOps context, and guarded troubleshooting workflows. This document records KubeCove's current product principles, system boundary, and module shape. User procedures belong in the [KubeCove Wiki](https://github.com/Timpan4/kubecove/wiki). Decisions with durable architectural consequences belong in [ADRs](decisions/).
+KubeCove is a Kubernetes workspace for cluster inspection, GitOps context, and guarded troubleshooting workflows. It runs as a local desktop app or as a single-user headless server on a remote host with cluster access. This document records KubeCove's current product principles, system boundary, and module shape. User procedures belong in the [KubeCove Wiki](https://github.com/Timpan4/kubecove/wiki). Decisions with durable architectural consequences belong in [ADRs](decisions/).
 
 ## Product identity
 
@@ -65,12 +65,12 @@ The Svelte frontend is untrusted relative to the Rust backend.
 
 - Raw kubeconfig contents, tokens, client keys, and certificate data stay backend-side.
 - The frontend cannot run arbitrary shell commands.
-- Kubernetes access crosses typed Tauri commands and normally uses `kube-rs`.
+- Desktop Kubernetes access crosses typed Tauri commands; the headless server exposes the same Rust command surface through authenticated HTTP and WebSocket adapters. Both normally use `kube-rs`.
 - Connected Argo CD credentials, TLS handling, request limits, Secret redaction, preflight or operation-session state, and execution stay backend-side.
 - Frontend responses are bounded, serialized summaries, details, YAML, stream events, results, or typed errors.
 - Secret disclosure is explicit and transient. Connected Argo Secret payloads are redacted before crossing the boundary.
 
-Argo operation reviews are five-minute, single-use Rust sessions. Durable session state uses only native credential storage. Before execution, Rust revalidates the allowlisted request, exact scope, available connection or Kubernetes client, and Application identity; resource actions are checked against the current server report. Execution remains bound to the reviewed transport.
+Argo operation reviews are five-minute, single-use Rust sessions. The desktop uses native credential storage. The headless Unix server uses native credential storage when available and can fall back to the protected file store defined by [ADR 0021](decisions/0021-file-credential-store-without-keyring.md). Before execution, Rust revalidates the allowlisted request, exact scope, available connection or Kubernetes client, and Application identity; resource actions are checked against the current server report. Execution remains bound to the reviewed transport.
 
 Resource Browser and GitOps provide `Refresh (clear cache)` inside a compact live-status menu, in the resource status area and beside the GitOps heading. It clears the relevant backend cache and reloads active reads, including open details, without resetting filters or selection. The menu shows connection details and refresh failures without a dedicated refresh row. Each resource watch reports its own health. While any watch is disconnected, KubeCove retries startup and reloads the view at the existing 15-second Argo inspection cadence; established watches reconnect in the backend. Normal watch renewals preserve connection status and do not trigger a full refresh. New views receive the current state of shared watches immediately. Reload failures remain distinct from connection failures and retry until they succeed.
 
@@ -110,6 +110,14 @@ Frontend rules:
 - credentials and broad raw Kubernetes objects do not become general frontend state.
 
 Detailed placement and hygiene rules live in the [engineering handbook](handbook/).
+
+## Headless server mode
+
+`kubecove-server` is a separate binary that embeds the browser build and exposes the existing command surface through authenticated HTTP and WebSocket adapters. It runs as one OS user on a remote host or in an operator-deployed container. It is not multi-tenant and does not deploy an agent or resources into Kubernetes. See [ADR 0020](decisions/0020-headless-server-mode.md) for the transport and session contract and the [Kubernetes example](../deploy/README.md) for operator setup.
+
+The server binds to loopback by default and requires authentication, including on loopback. Each server runs exactly one mode. The default is a fresh per-start token. Operators can instead select verified Cloudflare Access or OIDC browser sign-in without a separate token. Both require native TLS and an exact HTTPS public origin and bind resume credentials to the verified subject; see [ADR 0022](decisions/0022-oidc-server-sign-in.md) for OIDC. Sign-in controls who may use KubeCove. All permitted users share the server's configured Kubernetes credentials and one active owner; sign-in identities are not passed to Kubernetes RBAC. A non-loopback TCP listener requires explicit remote mode and TLS. Browser clients normally connect through an SSH local forward; desktop remote mode uses its Rust backend as the HTTP and WebSocket client for token-authenticated servers. Browser port forwards bind to server loopback, while desktop remote forwards tunnel to laptop loopback. A client takeover closes the previous owner's streams, exec sessions, and laptop tunnels; server-bound forwards remain on the server.
+
+The server's data directory stores settings, kubeconfig source paths, and startup credentials. On Unix, the token is mode `0600` in a private `0700` directory. When native credential storage is unavailable, the Unix server may store connected credentials and operation sessions in the encrypted file store from [ADR 0021](decisions/0021-file-credential-store-without-keyring.md). That store protects against other OS users, not processes running as the same user, root, or backups containing both files.
 
 ## Backend shape
 
