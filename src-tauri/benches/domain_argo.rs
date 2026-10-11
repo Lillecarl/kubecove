@@ -156,7 +156,7 @@ mod argo_connected_inspector {
         ] {
             assert!(
                 !serialized.contains(secret),
-                "connected inspector leaked {secret}"
+                "connected inspector leaked a fixture credential"
             );
         }
 
@@ -241,7 +241,7 @@ mod argo_selected_comparison_connected {
         ] {
             assert!(
                 !serialized.contains(secret),
-                "connected comparison leaked {secret}"
+                "connected comparison leaked a fixture credential"
             );
         }
         let missing = domain_argo::selected_resource("absent-resource", "Secret");

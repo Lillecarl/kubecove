@@ -34,13 +34,15 @@ export function forEachYamlErrorLensDiagnostic(
 	doc: Text,
 	visit: (to: number, diagnostic: Diagnostic) => void,
 ): void {
-	const seenLines = new Set<number>();
+	const selectedLines = new Map<number, Diagnostic>();
 	for (const diagnostic of diagnostics) {
 		if (diagnostic.severity === "info") continue;
 		const line = doc.lineAt(diagnostic.from);
-		if (seenLines.has(line.number)) continue;
-		seenLines.add(line.number);
-		visit(line.to, diagnostic);
+		if (selectedLines.has(line.to)) continue;
+		selectedLines.set(line.to, diagnostic);
+	}
+	for (const [to, diagnostic] of [...selectedLines].sort(([a], [b]) => a - b)) {
+		visit(to, diagnostic);
 	}
 }
 

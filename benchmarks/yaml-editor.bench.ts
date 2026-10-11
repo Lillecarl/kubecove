@@ -70,6 +70,26 @@ assert.equal(changedEditorState.doc.toString(), changedYaml);
 assert.equal(mappedDiagnostics.length, returnedDiagnostics.length);
 assert(initialDecorations.size > 0 && changedDecorations.size > 0);
 assert(mappedLensCount > 0 && mappedLensCount < lensDiagnostics.length);
+assert.equal(buildErrorLensDecorations().size, mappedLensCount);
+
+function buildErrorLensDecorations() {
+	const builder = new RangeSetBuilder<Decoration>();
+	forEachYamlErrorLensDiagnostic(
+		lensDiagnostics,
+		editorDocument,
+		(to, diagnostic) => {
+			builder.add(
+				to,
+				to,
+				Decoration.widget({
+					widget: new HeadlessErrorLensWidget(diagnostic),
+					side: 1,
+				}),
+			);
+		},
+	);
+	return builder.finish();
+}
 
 describe("F21 lint result application with folded F17 and F23, plus F22 editor updates", () => {
 	bench("F21 full valid document local YAML lint", () => {
@@ -88,22 +108,7 @@ describe("F21 lint result application with folded F17 and F23, plus F22 editor u
 	);
 
 	bench("F23 grouped error lens mapping over prepared diagnostics", () => {
-		const builder = new RangeSetBuilder<Decoration>();
-		forEachYamlErrorLensDiagnostic(
-			lensDiagnostics,
-			editorDocument,
-			(to, diagnostic) => {
-				builder.add(
-					to,
-					to,
-					Decoration.widget({
-						widget: new HeadlessErrorLensWidget(diagnostic),
-						side: 1,
-					}),
-				);
-			},
-		);
-		builder.finish();
+		buildErrorLensDecorations();
 	});
 
 	bench("F22 full decoration build for initial YAML document", () => {
