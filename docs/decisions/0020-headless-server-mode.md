@@ -50,10 +50,16 @@ The existing backend library builds without its default `desktop` feature. Tauri
 
 ### Session ownership and reconnect
 
-- The server has one active owner at a time. Authenticating another client makes it the owner. The previous socket receives `session_moved` and closes. Its streams, exec sessions, and tunnelled forwards stop. Port-forwards listening on the server move to the new owner, where they stay visible and stoppable.
-- Each owner receives a resume token. If the socket drops, the owner's streams, exec sessions, and port-forwards keep running for the grace window. Stream output is buffered within existing per-stream bounds, dropping oldest first. Reconnecting with the resume token reattaches channels and redraws exec terminals.
+Amendment, 2026-10-11: the server runs several sessions side by side. The first release had one active owner, as the first step toward this. A sign-in no longer takes over another session.
+
+- Each authentication without a resume token opens a new session beside the open ones. Nothing caps the number of sessions. Each session holds its own live store and client caches, so memory grows with the number of active sessions; reducing that cost is the way to serve more users, not a session limit.
+- Each session has its own backend state: live store, request cancellation, streams, exec sessions, Argo CD connections, port-forwards and backend diagnostics. Its Kubernetes clients and their cancellation generation are its own, so cancelling one workspace cancels nothing in another session. Port-forwards stop when their session ends. One session's cleanup does not delay another session's login, resume or close.
+- Kubeconfig source settings and the remembered credential store stay shared by the server. With OIDC credential forwarding the source settings are read-only; in the other modes, one session's change applies to all sessions.
+- A resume token only resumes its own session, and only for the same identity, as before.
+- In Cloudflare Access and OIDC modes, a session stores Argo CD credentials under its identity. Another identity cannot read them, although the connection profiles stay shared.
+- Each session receives a resume token. If the socket drops, the owner's streams, exec sessions, and port-forwards keep running for the grace window. Stream output is buffered within existing per-stream bounds, dropping oldest first. Reconnecting with the resume token reattaches channels and redraws exec terminals.
 - `--session-grace` sets the window. The default is 5 minutes, chosen by the product owner. A value of `0` stops everything on disconnect. When the window expires, cleanup matches desktop app exit.
-- Registries carry an owner id so a later change can scope them per connection without another data-model change.
+- Live-session registries belong to their session.
 
 ### Cloudflare Access sign-in
 
@@ -61,7 +67,7 @@ Amendment, 2026-10-10: the operator can select Cloudflare Access authentication 
 
 - Access mode requires native TLS and an exact HTTPS public origin. It accepts only a signed `Cf-Access-Jwt-Assertion`, verified with RS256 against the configured team's HTTPS `/cdn-cgi/access/certs` endpoint. Verification requires the exact issuer and application audience, an unexpired application token, and a nonempty subject. Unverified email headers, token bodies, KubeCove cookies and bearer tokens cannot authenticate Access mode.
 - The application audience is Cloudflare's AUD tag, not the Access application UUID. The operator's Access policy determines which users can access this shared backend. KubeCove continues to use the server's Kubernetes identity rather than impersonating the email address.
-- Protected HTTP requests and WebSocket upgrades require a valid Access JWT. The authentication-mode endpoint exposes only the selected mode and requires no credential. Open WebSockets close when the verified token expires; resources follow the existing reconnect grace policy. Refreshed Access tokens with the same subject can reconnect. A session resume credential cannot be used by a different Access subject. A fresh login can transfer the single active owner, as before.
+- Protected HTTP requests and WebSocket upgrades require a valid Access JWT. The authentication-mode endpoint exposes only the selected mode and requires no credential. Open WebSockets close when the verified token expires; resources follow the existing reconnect grace policy. Refreshed Access tokens with the same subject can reconnect. A session resume credential cannot be used by a different Access subject. A fresh login opens another session (session amendment of 2026-10-11).
 - Signing keys refresh from the configured endpoint when their HTTP cache lifetime expires or an unknown key ID is received. Redirects and JWT-supplied key URLs are not followed. Key-fetch or validation failure denies access; expired keys are not used as a fallback.
 - The server exposes its authentication mode, never credentials, so the browser can choose automatic Access sign-in or the existing token form. In Access mode it generates no startup token, writes no token file and sets no KubeCove authentication cookie. Access credentials never enter application logs or diagnostics.
 
@@ -71,7 +77,8 @@ Boundary verification must cover valid Access login without a token, forged or d
 
 OIDC browser sign-in is an additional mutually exclusive mode defined in
 [ADR 0022](0022-oidc-server-sign-in.md). It authenticates users without changing
-the server's Kubernetes identity or single-owner contract.
+the server's Kubernetes identity or the session rules above. Its amendment
+lets each session call Kubernetes as its own signed-in user.
 
 - In browser mode, port-forward listeners bind to `127.0.0.1` on the server, and the UI labels them as remote. Desktop remote mode tunnels forwards to the laptop under the ADR 0003 amendment of 2026-10-09.
 - Settings and kubeconfig source lists use `--data-dir`, which defaults to the platform config directory. Kubeconfig paths refer to server files, and Rust returns only summaries.

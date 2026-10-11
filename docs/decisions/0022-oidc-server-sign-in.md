@@ -69,12 +69,17 @@ sent: the server strips them, and a deployment should hold none.
 
 - The server keeps the ID token and refresh token in memory only, beside the
   opaque cookie's identity. Nothing is written to the data directory.
-- One process-wide slot holds the active owner's ID token. Every Kubernetes
-  request reads it when sent, so a renewed token or a new owner applies to
+- Each session has its own slot for its user's ID token (ADR 0020, session
+  amendment of 2026-10-11). A client built for the session carries the slot
+  and reads it when each request is sent, so a renewed token applies to
   cached clients and watch reconnects. An empty slot sends no credentials.
-- The slot is set when an owner session starts or resumes, and cleared when
-  that owner ends, signs out, or its sign-in expires or is revoked.
-- Only the active owner's token is renewed, 60 seconds before it expires. A
+  A client cannot be built outside a session.
+- The slot is set when a session starts or resumes, and cleared when that
+  session ends, signs out, or its sign-in expires or is revoked.
+- Kubeconfig source settings are shared by all users, so they are read-only
+  while forwarding. The operator sets them.
+- Only sign-ins with an open session are renewed, 60 seconds before the
+  token expires. A
   renewed ID token must keep the subject and authorized party, and carry no
   nonce or the login nonce (OIDC Core 12.2). If the provider refuses after
   the token expired, the sign-in is revoked.
