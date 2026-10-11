@@ -3,6 +3,30 @@
 All notable KubeCove beta releases are documented here. GitHub release notes
 should mirror the matching version section.
 
+## 0.12.0 - 2026-10-11
+### Added
+
+- Run KubeCove on a remote host with the GUI-free Rust server and embedded browser app (#510).
+- Connect the desktop app to a remote server, including laptop-local port forwards (#510).
+- Choose token, Cloudflare Access or OIDC sign-in, with an Authentik deployment guide (#510).
+- Store credentials privately on Unix hosts without a desktop keyring (#510).
+
+### Improved
+
+- Keep readable workspace resources visible when Kubernetes RBAC denies some resource types (#510).
+- Keep workspace creation controls reachable on mobile browsers (#510).
+
+### Fixed
+
+- Update vulnerable dependencies and fix CI checks (#510).
+- Verified security scan findings (#506).
+
+### Release
+
+- Publish full browser/server and slim API-only container images to GHCR (#510).
+- Attach standalone server archives for Linux x64, macOS x64 and macOS arm64 (#510).
+- Document operator-managed Kubernetes and k0s deployments (#510).
+
 ## 0.11.3 - 2026-10-01
 ### Added
 
