@@ -91,9 +91,9 @@ jobs:
         run: |
           set -euo pipefail
           for variant in full slim; do
-            features=()
-            if [[ "$variant" == slim ]]; then features+=(--no-default-features); fi
-            cargo build --locked --release --manifest-path src-tauri/server/Cargo.toml --target "$TARGET" "${features[@]}"
+            build=(cargo build --locked --release --manifest-path src-tauri/server/Cargo.toml --target "$TARGET")
+            if [[ "$variant" == slim ]]; then build+=(--no-default-features); fi
+            "${build[@]}"
             bash scripts/package-server.sh "$TARGET" "$variant" "${TAG_NAME#app-v}"
           done
 
