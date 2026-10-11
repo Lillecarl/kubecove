@@ -20,6 +20,17 @@ function step(job, name) {
   return found;
 }
 
+test("release orchestration runs after dependencies are installed in CI and releases", () => {
+  const ci = parse(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
+  for (const source of [ci, workflow]) {
+    const frontend = job("frontend", source);
+    const installed = frontend.steps.indexOf(step(frontend, "Install frontend dependencies"));
+    const tested = frontend.steps.findIndex(({ run }) => run?.includes("node --test") &&
+      run.includes("scripts/release-workflow-regression.test.mjs"));
+    assert.ok(tested > installed, "release tests need the installed YAML parser");
+  }
+});
+
 test("both container variants and architectures are verified before registry publication", () => {
   const build = job("container-build", packaging);
   assert.deepEqual(build.strategy.matrix.include.map(({ arch, variant }) => `${arch}/${variant}`).sort(),
