@@ -8,13 +8,25 @@ export default defineConfig(({ command }) => {
 	const host = process.env.TAURI_DEV_HOST?.trim();
 	const releaseChannel = process.env.KUBECOVE_PUBLIC_RELEASE_CHANNEL === "stable" ? "stable" : "dev";
 	const profiling = process.env.KUBECOVE_PUBLIC_PROFILE === "true";
+	const runtime = process.env.KUBECOVE_PUBLIC_RUNTIME === "web" ? "web" : "native";
 	return {
-		plugins: [svelte(), tailwindcss(), frontendBundleReportPlugin(releaseChannel, profiling)],
+		plugins: [
+			svelte(), tailwindcss(), frontendBundleReportPlugin(releaseChannel, profiling),
+			{
+				name: "native-e2e-bridge",
+				transformIndexHtml: {
+					order: "pre",
+						handler: () => runtime !== "web" && process.env.KUBECOVE_E2E === "1"
+						? [{ tag: "script", attrs: { type: "module" }, children: 'import "@wdio/tauri-plugin";', injectTo: "head" }]
+						: [],
+				},
+			},
+		],
 		resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
 		// First opening a deferred screen must not trigger optimizer reloads.
 		optimizeDeps: {
 			include: [
-				"@tauri-apps/plugin-opener",
+				...(runtime === "web" ? [] : ["@tauri-apps/plugin-opener"]),
 				"@codemirror/lang-yaml",
 				"@codemirror/language",
 				"@codemirror/lint",
@@ -27,6 +39,7 @@ export default defineConfig(({ command }) => {
 		},
 		define: {
 			"process.env.KUBECOVE_PUBLIC_DEV": JSON.stringify(String(command === "serve")),
+			"process.env.KUBECOVE_PUBLIC_RUNTIME": JSON.stringify(runtime),
 			"process.env.KUBECOVE_PUBLIC_PROFILE": JSON.stringify(String(profiling)),
 			"process.env.KUBECOVE_PUBLIC_RELEASE_CHANNEL": JSON.stringify(releaseChannel),
 		},

@@ -12,6 +12,8 @@
 </script>
 
 <script lang="ts">
+	import ResourceScopeWarnings from "./ResourceScopeWarnings.svelte";
+	import type { ResourceScopeResult } from "@/lib/types";
 	import ResourceLiveStatusMenu from "@/components/ResourceLiveStatusMenu.svelte";
 	import { refreshCurrentView } from "@/lib/resource-refresh";
 	import { observeResourceScope } from "@/lib/resource-watch";
@@ -441,7 +443,7 @@
 	const resourceCancelScope = $derived(readSpecs.resourceCancelScope);
 	const topologyCancelScope = $derived(readSpecs.topologyCancelScope);
 	const metricsCancelScope = $derived(readSpecs.metricsCancelScope);
-	const resourcesQuery = createQuery<ResourceSummary[]>(() => ({
+	const resourcesQuery = createQuery<ResourceScopeResult>(() => ({
 		queryKey: resourceQueryKey,
 		queryFn: () => fetchResourcePage(clusterContext, fetchKeys, kubeconfigSourceKey, resourceCancelScope),
 		enabled: readSpecs.resourcesEnabled,
@@ -549,7 +551,7 @@
 		metricsQueryReady = false;
 	});
 	$effect(() => {
-		const rowCount = resourcesQuery.data?.length ?? 0;
+		const rowCount = resourcesQuery.data?.resources.length ?? 0;
 		if (
 			metricsQueryReady ||
 			!clusterContext ||
@@ -604,7 +606,7 @@
 	const selectedKindSet = $derived(new Set(selectedKinds.map(kindSelectionKey)));
 	const metricsIndex = $derived(resourceMetricIndex(metricsQuery.data));
 	const scopedRows = $derived(
-		filterResourcesByKinds(resourcesQuery.data ?? [], selectedKinds),
+		filterResourcesByKinds(resourcesQuery.data?.resources ?? [], selectedKinds),
 	);
 	const rowsWithMetrics = $derived(
 		mergeResourceMetrics(scopedRows, metricsQuery.data, metricsIndex),
@@ -978,6 +980,9 @@
 {/snippet}
 
 <div class="flex h-full min-h-0 min-w-0 flex-col gap-3">
+	{#if resourcesQuery.isSuccess && !resourcesQuery.isPlaceholderData}
+		<ResourceScopeWarnings failures={resourcesQuery.data?.failures ?? []} />
+	{/if}
 	{#if !clusterContext || fetchKeys.length === 0 || resourceError || loading}
 		<div class="flex justify-end">{@render refreshControls()}</div>
 	{/if}

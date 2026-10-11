@@ -13,6 +13,7 @@ import {
 	type ResourceKindSelection,
 	type ResourceListRequest,
 	type ResourceSummary,
+	type ResourceScopeFailure,
 } from "@/lib/types";
 import type { WorkspaceScope } from "@/lib/workspaces";
 import { workspaceScopeContexts } from "@/lib/workspaces";
@@ -25,6 +26,12 @@ export interface WorkspaceFetchKey {
 export interface WorkspaceFetchPlan {
 	clusterContext: string;
 	requests: ResourceListRequest[];
+}
+
+export interface WorkspaceResourceResult {
+	resources: ResourceSummary[];
+	failures: ResourceScopeFailure[];
+	coverage: WorkspaceFetchPlan[];
 }
 
 interface WorkspaceResourceFailure {
@@ -119,7 +126,7 @@ export async function fetchWorkspaceResources(
 	scope: WorkspaceScope,
 	availableNamespaces?: string[],
 	kubeconfigEnvVar?: string,
-): Promise<ResourceSummary[]> {
+): Promise<WorkspaceResourceResult> {
 	const client = createTauriClient();
 	const plans = buildWorkspaceFetchPlans(scope, availableNamespaces);
 	const results = await Promise.allSettled(
@@ -140,8 +147,11 @@ export async function fetchWorkspaceResources(
 	if (failures.length > 0) {
 		throw new WorkspaceResourceLoadError(failures);
 	}
-	const rows = results.flatMap((result) =>
-		result.status === "fulfilled" ? result.value : [],
-	);
-	return rows;
+	return {
+		resources: results.flatMap((result) => result.status === "fulfilled" ? result.value.resources : []),
+		failures: results.flatMap((result) => result.status === "fulfilled" ? result.value.failures : []),
+		coverage: results.flatMap((result, index) => result.status === "fulfilled"
+			? [{ clusterContext: plans[index].clusterContext, requests: result.value.completedRequests }]
+			: []),
+	};
 }

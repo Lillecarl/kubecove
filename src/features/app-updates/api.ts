@@ -1,5 +1,4 @@
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
+import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 
 import type { AppUpdate, AppUpdateApi, AppUpdateDownloadEvent } from "./types";
 
@@ -9,6 +8,7 @@ function mapDownloadEvent(event: DownloadEvent): AppUpdateDownloadEvent {
 
 export const tauriAppUpdateApi: AppUpdateApi = {
 	check: async (): Promise<AppUpdate | null> => {
+		const { check } = await import("@tauri-apps/plugin-updater");
 		const update = await check();
 		if (!update) return null;
 
@@ -21,5 +21,8 @@ export const tauriAppUpdateApi: AppUpdateApi = {
 				update.downloadAndInstall((event) => onEvent?.(mapDownloadEvent(event))),
 		};
 	},
-	relaunch,
+	relaunch: async () => {
+		const { relaunch } = await import("@tauri-apps/plugin-process");
+		return relaunch();
+	},
 };

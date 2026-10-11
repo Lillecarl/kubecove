@@ -41,11 +41,11 @@ describe("svelte settings store", () => {
 			readFileSync("src-tauri/capabilities/default.json", "utf8"),
 		);
 
-		expect(settingsSource).toContain('import { openUrl } from "@tauri-apps/plugin-opener"');
+		expect(settingsSource).toContain('await import("@tauri-apps/plugin-opener")');
 		expect(settingsSource).toContain(
 			'const WIKI_URL = "https://github.com/Timpan4/kubecove/wiki"',
 		);
-		expect(settingsSource).toContain("if (!isTauriRuntime()) return");
+		expect(settingsSource).toContain("if (isBrowserRuntime() || !isTauriRuntime()) return");
 		expect(settingsSource).toContain("await openUrl(WIKI_URL)");
 		expect(settingsSource).toContain("documentationError = error");
 		expect(settingsSource).toContain(
