@@ -118,9 +118,7 @@ impl Sessions {
             .lock()
             .await
             .iter()
-            .find(|owner| {
-                !owner.ended.is_cancelled() && equal_secret(&owner.resume_token, resume)
-            })
+            .find(|owner| !owner.ended.is_cancelled() && equal_secret(&owner.resume_token, resume))
             .cloned()
             .ok_or_else(|| AppError::new("session closed or expired", AppErrorKind::Session))
     }
@@ -173,9 +171,7 @@ impl Sessions {
             {
                 let _transition = sessions.transition.lock().await;
                 let socket = owner.socket.lock().await;
-                if socket.connected
-                    || socket.generation != generation
-                    || owner.ended.is_cancelled()
+                if socket.connected || socket.generation != generation || owner.ended.is_cancelled()
                 {
                     return;
                 }
@@ -226,6 +222,7 @@ async fn end(owner: &Owner) -> Result<(), AppError> {
     owner.ended.cancel();
     owner.channels.close();
     let _requests = owner.request_gate.write().await;
+    owner.backend.scope.set_bearer(None);
     owner.tunnels.close_all();
     owner.backend.cleanup().await
 }

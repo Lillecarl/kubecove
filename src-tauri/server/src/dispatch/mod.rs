@@ -48,7 +48,7 @@ pub async fn dispatch(
     args: &Value,
 ) -> Result<Value, AppError> {
     state
-        .scoped(dispatch_unscoped(state, channels, command, args))
+        .scoped(Box::pin(dispatch_unscoped(state, channels, command, args)))
         .await
 }
 

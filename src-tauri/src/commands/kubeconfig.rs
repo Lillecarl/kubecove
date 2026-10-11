@@ -582,11 +582,12 @@ fn load_persisted_sources() -> Result<PersistedKubeconfigSources, AppError> {
 }
 
 fn save_persisted_sources(settings: &PersistedKubeconfigSources) -> Result<(), AppError> {
-    // While forwarding, every signed-in user shares these settings, so one
-    // user's change would move every other user's requests.
-    if super::helpers::forwarded_bearer::forwarded_bearer_enabled() {
+    // Server sessions share these operator settings in every authentication mode.
+    if super::helpers::session_scope::SessionScope::current().is_some()
+        || super::helpers::forwarded_bearer::forwarded_bearer_enabled()
+    {
         return Err(AppError::new(
-            "kubeconfig sources are set by the server operator while users sign in with their own credentials",
+            "kubeconfig sources are set by the server operator",
             AppErrorKind::UnsupportedOperation,
         ));
     }

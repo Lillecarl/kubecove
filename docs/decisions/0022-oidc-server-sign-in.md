@@ -77,12 +77,18 @@ sent: the server strips them, and a deployment should hold none.
 - The slot is set when a session starts or resumes, and cleared when that
   session ends, signs out, or its sign-in expires or is revoked.
 - Kubeconfig source settings are shared by all users, so they are read-only
-  while forwarding. The operator sets them.
+  in every server authentication mode. The operator sets them.
 - Only sign-ins with an open session are renewed, 60 seconds before the
   token expires. A
   renewed ID token must keep the subject and authorized party, and carry no
   nonce or the login nonce (OIDC Core 12.2). If the provider refuses after
   the token expired, the sign-in is revoked.
+- Transport errors, provider outages and unusable refresh responses remain
+  retryable. Once the ID token expires, forwarding is suspended until a valid
+  renewal succeeds; the sign-in remains available within its existing deadline.
+- Check the sign-in deadline before renewal and again before accepting or
+  publishing its result. Session activation after renewal holds the session's
+  request gate and rejects an owner that has already ended.
 - The sign-in then lasts until the provider refuses a refresh, capped at 12
   hours, instead of ending with the first ID token. Without a refresh token
   it ends with the ID token, as before.

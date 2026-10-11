@@ -13,7 +13,7 @@ use openidconnect::{
     },
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
     EndpointSet, IssuerUrl, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier,
-    RedirectUrl, RefreshToken, TokenResponse,
+    RedirectUrl, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,6 +29,9 @@ use tokio_util::sync::CancellationToken;
 
 pub const TRANSACTION_COOKIE: &str = "__Host-kubecove_oidc_tx";
 pub const AUTH_COOKIE: &str = "__Host-kubecove_oidc";
+
+#[path = "oidc_refresh.rs"]
+mod refresh;
 
 type OidcClient = CoreClient<
     EndpointSet,
@@ -55,7 +58,9 @@ impl OidcConfig {
     /// must also be issued to `audience`, the API server's OIDC client ID.
     pub fn with_forwarded_credentials(mut self, audience: String) -> Result<Self, String> {
         if audience.trim().is_empty() || audience == self.client_id {
-            return Err("the Kubernetes audience must be the API server's own OIDC client ID".into());
+            return Err(
+                "the Kubernetes audience must be the API server's own OIDC client ID".into(),
+            );
         }
         self.kubernetes_audience = Some(audience);
         Ok(self)
@@ -142,6 +147,7 @@ struct Binding {
     credential: String,
     owner: String,
     scope: Arc<SessionScope>,
+    ended: CancellationToken,
 }
 
 struct Verified {
@@ -370,9 +376,7 @@ impl Oidc {
         let tokens = self.forwards_credentials().then(|| Tokens {
             id_token: id_token.to_string(),
             id_expires_unix: exp,
-            refresh_token: response
-                .refresh_token()
-                .map(|token| token.secret().clone()),
+            refresh_token: response.refresh_token().map(|token| token.secret().clone()),
             nonce: nonce.secret().clone(),
             subject: subject.clone(),
         });
@@ -434,237 +438,6 @@ impl Oidc {
                     Ok(())
                 }
             })
-    }
-
-    /// Makes this sign-in's ID token the one the session `owner` sends to
-    /// Kubernetes through `scope`, renewing it first if it is about to
-    /// expire.
-    pub async fn activate(
-        &self,
-        credential: &OidcCredential,
-        owner: &str,
-        scope: Arc<SessionScope>,
-    ) -> Result<(), ApiError> {
-        if !self.forwards_credentials() {
-            return Ok(());
-        }
-        self.ensure_fresh(&credential.0).await?;
-        {
-            let mut bound = self.bound.lock().map_err(|_| oidc_unavailable())?;
-            // A resumed session keeps sending its old token until publish
-            // sets the new one, never none.
-            bound.retain(|binding| binding.owner != owner);
-            bound.push(Binding {
-                credential: credential.0.clone(),
-                owner: owner.to_owned(),
-                scope,
-            });
-        }
-        self.publish(&credential.0);
-        Ok(())
-    }
-
-    /// Stops forwarding this sign-in's token, in every session it signs.
-    pub fn deactivate(&self, credential: &str) {
-        self.unbind(|binding| binding.credential == credential);
-    }
-
-    /// Stops forwarding for a session that ended.
-    pub fn release_owner(&self, owner: &str) {
-        self.unbind(|binding| binding.owner == owner);
-    }
-
-    fn unbind(&self, matches: impl Fn(&Binding) -> bool) {
-        let Ok(mut bound) = self.bound.lock() else {
-            return;
-        };
-        bound.retain(|binding| {
-            let remove = matches(binding);
-            if remove {
-                binding.scope.set_bearer(None);
-            }
-            !remove
-        });
-    }
-
-    fn publish(&self, credential: &str) {
-        let token = self.credentials.lock().ok().and_then(|credentials| {
-            credentials
-                .get(credential)
-                .and_then(|credential| credential.tokens.as_ref())
-                .map(|tokens| tokens.id_token.clone())
-        });
-        // Held while setting, so a concurrent unbind cannot be overwritten.
-        let Ok(bound) = self.bound.lock() else {
-            return;
-        };
-        for binding in bound.iter().filter(|binding| binding.credential == credential) {
-            binding.scope.set_bearer(token.as_deref());
-        }
-    }
-
-    /// Renews the ID token of every sign-in with an open session until the
-    /// server stops. A sign-in without one is not renewed: that would keep a
-    /// closed browser's provider session alive past the realm's idle timeout.
-    pub async fn refresh_forever(&self) {
-        loop {
-            tokio::time::sleep(REFRESH_INTERVAL).await;
-            let mut credentials = self
-                .bound
-                .lock()
-                .map(|bound| {
-                    bound
-                        .iter()
-                        .map(|binding| binding.credential.clone())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            credentials.sort_unstable();
-            credentials.dedup();
-            for credential in credentials {
-                let _ = self.ensure_fresh(&credential).await;
-            }
-        }
-    }
-
-    async fn ensure_fresh(&self, credential: &str) -> Result<(), ApiError> {
-        let _refreshing = self.refreshing.lock().await;
-        let tokens = {
-            let credentials = self.credentials.lock().map_err(|_| oidc_unavailable())?;
-            credentials
-                .get(credential)
-                .ok_or_else(invalid_auth)?
-                .tokens
-                .clone()
-                .ok_or_else(invalid_auth)?
-        };
-        if tokens.id_expires_unix > unix_now() + REFRESH_MARGIN_SECONDS {
-            return Ok(());
-        }
-        match self.refresh(&tokens).await {
-            Some(renewed) => {
-                if let Some(entry) = self
-                    .credentials
-                    .lock()
-                    .map_err(|_| oidc_unavailable())?
-                    .get_mut(credential)
-                {
-                    entry.tokens = Some(renewed);
-                }
-                self.publish(credential);
-                Ok(())
-            }
-            // The token still works; try again on the next tick.
-            None if tokens.id_expires_unix > unix_now() => Ok(()),
-            None => {
-                if let Some(entry) = self
-                    .credentials
-                    .lock()
-                    .map_err(|_| oidc_unavailable())?
-                    .remove(credential)
-                {
-                    entry.revoked.cancel();
-                }
-                self.deactivate(credential);
-                Err(invalid_auth())
-            }
-        }
-    }
-
-    async fn refresh(&self, tokens: &Tokens) -> Option<Tokens> {
-        let refresh_token = RefreshToken::new(tokens.refresh_token.clone()?);
-        let metadata = discover_metadata(&self.config.issuer, &self.http)
-            .await
-            .ok()?;
-        validate_metadata(&self.config.issuer, &metadata, self.allow_http_test).ok()?;
-        let client = self.client(&metadata).ok()?;
-        let response = client
-            .exchange_refresh_token(&refresh_token)
-            .ok()?
-            .request_async(&{
-                let http = self.http.clone();
-                move |request| send_request(http.clone(), request)
-            })
-            .await
-            .ok()?;
-        let id_token = response.id_token()?;
-        // OIDC Core 12.2: a refreshed ID token carries no nonce, or the
-        // original one.
-        let login_nonce = tokens.nonce.clone();
-        let claims = id_token
-            .claims(&self.id_token_verifier(&client), |nonce: Option<&Nonce>| {
-                match nonce {
-                    Some(nonce) if nonce.secret() != &login_nonce => {
-                        Err("refreshed ID token nonce differs".to_owned())
-                    }
-                    _ => Ok(()),
-                }
-            })
-            .ok()?;
-        let (subject, exp) = self.accept_claims(claims, &id_token.to_string())?;
-        if subject != tokens.subject {
-            return None;
-        }
-        Some(Tokens {
-            id_token: id_token.to_string(),
-            id_expires_unix: exp,
-            refresh_token: response
-                .refresh_token()
-                .map(|token| token.secret().clone())
-                .or_else(|| tokens.refresh_token.clone()),
-            nonce: tokens.nonce.clone(),
-            subject,
-        })
-    }
-
-    fn prune_expired(&self, credentials: &mut HashMap<String, Credential>) {
-        let now = unix_now();
-        let expired = credentials
-            .iter()
-            .filter(|(_, credential)| credential.expires_unix <= now)
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>();
-        for key in expired {
-            if let Some(credential) = credentials.remove(&key) {
-                credential.revoked.cancel();
-            }
-            self.deactivate(&key);
-        }
-    }
-
-    pub fn verify(&self, headers: &HeaderMap) -> Result<AuthSession, ApiError> {
-        let token = cookie_value(headers, AUTH_COOKIE).ok_or_else(invalid_auth)?;
-        let mut credentials = self.credentials.lock().map_err(|_| oidc_unavailable())?;
-        self.prune_expired(&mut credentials);
-        let credential = credentials.get(token).ok_or_else(invalid_auth)?;
-        Ok(AuthSession {
-            identity: credential.identity.clone(),
-            revoked: credential.revoked.clone(),
-            credential: OidcCredential(token.to_owned()),
-        })
-    }
-
-    pub fn logout(&self, headers: &HeaderMap) -> Result<Option<String>, ApiError> {
-        let token = cookie_value(headers, AUTH_COOKIE);
-        let mut credentials = self.credentials.lock().map_err(|_| oidc_unavailable())?;
-        let subject = token
-            .and_then(|token| credentials.remove(token))
-            .map(|credential| {
-                credential.revoked.cancel();
-                credential.identity.subject
-            });
-        if let Some(token) = token {
-            self.deactivate(token);
-        }
-        self.prune_expired(&mut credentials);
-        Ok(subject)
-    }
-
-    pub fn clear_cookies(&self) -> Result<Vec<HeaderValue>, ApiError> {
-        [TRANSACTION_COOKIE, AUTH_COOKIE]
-            .into_iter()
-            .map(|name| cookie_header(&clear_cookie_header(name)))
-            .collect()
     }
 
     fn client(&self, metadata: &CoreProviderMetadata) -> Result<OidcClient, String> {
@@ -954,7 +727,6 @@ fn timeout_seconds_ceil(timeout: Duration) -> u64 {
         .as_secs()
         .saturating_add(u64::from(timeout.subsec_nanos() > 0))
 }
-
 
 fn callback_failure(denied: bool) -> Response {
     let mut response = if denied {

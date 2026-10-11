@@ -23,6 +23,8 @@ struct ProviderState {
     refreshes: Arc<std::sync::atomic::AtomicUsize>,
     /// Added to `aud`, with `azp`, as an audience mapper does.
     extra_audience: Option<String>,
+    refresh_gate: Arc<tokio::sync::Mutex<()>>,
+    refresh_started: Arc<tokio::sync::Notify>,
 }
 
 impl ProviderState {
@@ -40,6 +42,7 @@ pub(crate) enum ClaimMode {
     /// ID tokens expire two seconds after issue.
     ShortLived,
     RefreshRefused,
+    RefreshUnavailable,
     /// Leaves the forwarding audience out of the login token.
     WithoutExtraAudience,
     WrongIssuer,
@@ -70,6 +73,8 @@ pub(crate) struct MockProvider {
     claim_mode: Arc<Mutex<ClaimMode>>,
     exchanges: Arc<std::sync::atomic::AtomicUsize>,
     refreshes: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) refresh_gate: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) refresh_started: Arc<tokio::sync::Notify>,
 }
 
 impl MockProvider {
@@ -148,10 +153,14 @@ pub(crate) async fn fixture_with(
         refresh_tokens: Arc::new(Mutex::new(HashMap::new())),
         refreshes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         extra_audience: kubernetes_audience.map(str::to_owned),
+        refresh_gate: Arc::default(),
+        refresh_started: Arc::default(),
     };
     let claim_mode = Arc::clone(&state.claim_mode);
     let exchanges = Arc::clone(&state.exchanges);
     let refreshes = Arc::clone(&state.refreshes);
+    let refresh_gate = Arc::clone(&state.refresh_gate);
+    let refresh_started = Arc::clone(&state.refresh_started);
     let app = Router::new()
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/authorize", get(authorize))
@@ -199,6 +208,8 @@ pub(crate) async fn fixture_with(
             claim_mode,
             exchanges,
             refreshes,
+            refresh_gate,
+            refresh_started,
         },
     ))
 }
@@ -271,9 +282,21 @@ async fn authorize(
 async fn token(
     State(provider): State<ProviderState>,
     Form(form): Form<HashMap<String, String>>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Response, StatusCode> {
     if form.get("grant_type").map(String::as_str) == Some("refresh_token") {
-        return refresh(&provider, &form);
+        provider.refresh_started.notify_one();
+        let _refresh = provider.refresh_gate.lock().await;
+        if matches!(
+            *provider.claim_mode.lock().unwrap(),
+            ClaimMode::RefreshRefused
+        ) {
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "invalid_grant"})),
+            )
+                .into_response());
+        }
+        return refresh(&provider, &form).map(IntoResponse::into_response);
     }
     let token_request = TokenRequest {
         code: form.get("code").cloned().ok_or(StatusCode::BAD_REQUEST)?,
@@ -337,6 +360,7 @@ async fn token(
         ClaimMode::ShortLived => claims["exp"] = json!(now + 2),
         ClaimMode::Valid
         | ClaimMode::RefreshRefused
+        | ClaimMode::RefreshUnavailable
         | ClaimMode::WithoutExtraAudience
         | ClaimMode::WrongSignature
         | ClaimMode::UnsupportedAlgorithm
@@ -374,7 +398,7 @@ async fn token(
     } else {
         json!({"access_token":"discarded-test-access-token","token_type":"Bearer","expires_in":300,"id_token":id_token,"refresh_token":refresh_token})
     };
-    Ok(Json(response))
+    Ok(Json(response).into_response())
 }
 
 fn issue_refresh_token(provider: &ProviderState, nonce: String) -> Result<String, StatusCode> {
@@ -396,27 +420,35 @@ fn refresh(
         .claim_mode
         .lock()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if matches!(mode, ClaimMode::RefreshUnavailable) {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
     let nonce = provider
         .refresh_tokens
         .lock()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .remove(form.get("refresh_token").ok_or(StatusCode::BAD_REQUEST)?)
         .ok_or(StatusCode::BAD_REQUEST)?;
-    if matches!(mode, ClaimMode::RefreshRefused) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
     provider
         .refreshes
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let now = unix_now();
-    let lifetime = if matches!(mode, ClaimMode::ShortLived) { 2 } else { 300 };
+    let lifetime = if matches!(mode, ClaimMode::ShortLived) {
+        2
+    } else {
+        300
+    };
     let mut claims = json!({
         "iss": provider.issuer, "aud": "kubecove-test-client", "sub": "mock-user",
         "exp": now + lifetime, "iat": now, "nonce": nonce,
         "jti": crate::security::random_token().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     });
     provider.audience(&mut claims);
-    let id_token = encode(&Header::new(Algorithm::RS256), &claims, &provider.signing_key)
+    let id_token = encode(
+        &Header::new(Algorithm::RS256),
+        &claims,
+        &provider.signing_key,
+    )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let refresh_token = issue_refresh_token(provider, nonce)?;
     Ok(Json(json!({

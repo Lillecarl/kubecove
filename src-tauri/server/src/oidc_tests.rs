@@ -2,6 +2,181 @@ use super::*;
 use axum::http::{header, HeaderMap};
 use std::{path::PathBuf, time::Duration};
 
+impl Oidc {
+    async fn activate(
+        &self,
+        credential: &OidcCredential,
+        owner: &str,
+        scope: Arc<SessionScope>,
+    ) -> Result<(), ApiError> {
+        self.ensure_fresh(&credential.0).await?;
+        self.bind(credential, owner, scope, &CancellationToken::new())
+    }
+}
+
+#[tokio::test]
+async fn expired_sign_in_cannot_refresh_or_publish() {
+    let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+        .await
+        .unwrap();
+    provider.set_claim_mode(mock::ClaimMode::ShortLived);
+    let (_, auth) = signed_in(&oidc).await;
+    let scope = SessionScope::new(None);
+    oidc.activate(&auth.credential, "owner", Arc::clone(&scope))
+        .await
+        .unwrap();
+    let before = provider.refreshes();
+    oidc.credentials
+        .lock()
+        .unwrap()
+        .get_mut(&auth.credential.0)
+        .unwrap()
+        .expires_unix = unix_now();
+    assert!(oidc.ensure_fresh(&auth.credential.0).await.is_err());
+    assert!(auth.revoked.is_cancelled());
+    assert!(scope.bearer().is_none());
+    assert!(oidc.bound.lock().unwrap().is_empty());
+    assert_eq!(provider.refreshes(), before);
+}
+
+#[tokio::test]
+async fn sign_in_expiring_during_refresh_cannot_publish_the_response() {
+    let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+        .await
+        .unwrap();
+    provider.set_claim_mode(mock::ClaimMode::ShortLived);
+    let (_, auth) = signed_in(&oidc).await;
+    let scope = SessionScope::new(None);
+    // Bind a valid token first, then force renewal through the network barrier.
+    provider.set_claim_mode(mock::ClaimMode::Valid);
+    oidc.activate(&auth.credential, "owner", Arc::clone(&scope))
+        .await
+        .unwrap();
+    provider.refresh_started.notified().await;
+    oidc.credentials
+        .lock()
+        .unwrap()
+        .get_mut(&auth.credential.0)
+        .unwrap()
+        .tokens
+        .as_mut()
+        .unwrap()
+        .id_expires_unix = unix_now();
+    let gate = provider.refresh_gate.lock().await;
+    let mut renewal = Box::pin(oidc.ensure_fresh(&auth.credential.0));
+    tokio::select! {
+        () = provider.refresh_started.notified() => {},
+        _ = &mut renewal => panic!("refresh must wait for the provider"),
+    }
+    oidc.credentials
+        .lock()
+        .unwrap()
+        .get_mut(&auth.credential.0)
+        .unwrap()
+        .expires_unix = unix_now();
+    drop(gate);
+    assert!(renewal.await.is_err());
+    assert!(auth.revoked.is_cancelled());
+    assert!(scope.bearer().is_none());
+}
+
+#[tokio::test]
+async fn provider_outage_suspends_expired_token_and_recovers_without_new_login() {
+    let (oidc, provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+        .await
+        .unwrap();
+    provider.set_claim_mode(mock::ClaimMode::ShortLived);
+    let (headers, auth) = signed_in(&oidc).await;
+    let scope = SessionScope::new(None);
+    oidc.activate(&auth.credential, "owner", Arc::clone(&scope))
+        .await
+        .unwrap();
+    provider.set_claim_mode(mock::ClaimMode::RefreshUnavailable);
+    oidc.ensure_fresh(&auth.credential.0).await.unwrap();
+    assert!(scope.bearer().is_some(), "unexpired tokens remain usable");
+    oidc.credentials
+        .lock()
+        .unwrap()
+        .get_mut(&auth.credential.0)
+        .unwrap()
+        .tokens
+        .as_mut()
+        .unwrap()
+        .id_expires_unix = unix_now();
+    let _ = oidc.ensure_fresh(&auth.credential.0).await;
+    assert!(!auth.revoked.is_cancelled());
+    assert!(oidc.verify(&headers).is_ok());
+    assert!(scope.bearer().is_none());
+    assert_eq!(oidc.bound.lock().unwrap().len(), 1);
+    provider.set_claim_mode(mock::ClaimMode::Valid);
+    oidc.ensure_fresh(&auth.credential.0).await.unwrap();
+    assert!(
+        scope.bearer().is_some(),
+        "recovery republishes to the existing session"
+    );
+}
+
+#[tokio::test]
+async fn close_during_resume_cannot_restore_session_credentials() {
+    use axum::{extract::State, Extension};
+    use futures_util::FutureExt;
+    let (oidc, _provider) = mock::fixture_with("http://localhost:43134", Some("kubernetes"))
+        .await
+        .unwrap();
+    let (_, auth) = signed_in(&oidc).await;
+    let oidc = Arc::new(oidc);
+    let state = Arc::new(crate::AppState {
+        token: String::new(),
+        policy: crate::security::NetworkPolicy {
+            hosts: vec![],
+            origins: vec![],
+            secure: true,
+        },
+        sessions: Arc::new(crate::sessions::Sessions::new(Duration::from_mins(5))),
+        credential_store: String::new(),
+        access: None,
+        oidc: Some(Arc::clone(&oidc)),
+    });
+    let open = crate::login(
+        State(Arc::clone(&state)),
+        Some(Extension(auth.identity.clone())),
+        Some(Extension(auth.credential.clone())),
+        HeaderMap::new(),
+        Ok(Json(crate::Login {
+            token: None,
+            resume_token: None,
+        })),
+    )
+    .await
+    .unwrap();
+    let body = axum::body::to_bytes(open.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let resume = info["resumeToken"].as_str().unwrap().to_owned();
+    let owner = state.sessions.owner(&resume).await.unwrap();
+    let refreshing = oidc.refreshing.lock().await;
+    let mut resuming = Box::pin(crate::login(
+        State(Arc::clone(&state)),
+        Some(Extension(auth.identity.clone())),
+        Some(Extension(auth.credential.clone())),
+        HeaderMap::new(),
+        Ok(Json(crate::Login {
+            token: None,
+            resume_token: Some(resume.clone()),
+        })),
+    ));
+    assert!(resuming.as_mut().now_or_never().is_none());
+    state.sessions.close(&resume).await.unwrap();
+    tokio::task::yield_now().await;
+    assert!(oidc.bound.lock().unwrap().is_empty());
+    assert!(owner.backend.scope.bearer().is_none());
+    drop(refreshing);
+    assert!(resuming.await.is_err());
+    assert!(owner.backend.scope.bearer().is_none());
+    assert!(oidc.bound.lock().unwrap().is_empty());
+}
+
 #[test]
 fn config_rejects_http_and_issuer_credentials_or_components() {
     for issuer in [

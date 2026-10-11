@@ -67,7 +67,7 @@ async fn diagnostics_belong_to_their_session() {
         })
         .await;
     assert_eq!(alice.scoped(async { get_backend_diagnostics() }).await.len(), 1);
-    assert!(bob.scoped(async { get_backend_diagnostics() }).await.is_empty());
+    assert_eq!(bob.scoped(async { get_backend_diagnostics() }).await.len(), 0);
 }
 
 // Watches, exec and port-forwards build their clients inside tasks that the

@@ -328,14 +328,25 @@ async fn login(
         if oidc.forwards_credentials() {
             let opened = login.resume_token.is_none();
             let owner = state.sessions.owner(&session.resume_token).await?;
-            if let Err(error) = oidc
-                .activate(
+            let activation = async {
+                oidc.ensure_fresh(&credential.0).await?;
+                let _request = owner.request_gate.read().await;
+                if owner.ended.is_cancelled() {
+                    return Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "session closed or expired",
+                        AppErrorKind::Session,
+                    ));
+                }
+                oidc.bind(
                     &credential,
                     &owner.resume_token,
                     Arc::clone(&owner.backend.scope),
+                    &owner.ended,
                 )
-                .await
-            {
+            }
+            .await;
+            if let Err(error) = activation {
                 // A session nobody can use must not hold a slot until it expires.
                 if opened {
                     let _ = state.sessions.close(&owner.resume_token).await;

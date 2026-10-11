@@ -196,6 +196,20 @@ try {
 		assert.ok(String(error.message) === error.message);
 	}
 	checks.push("Cookie/native commands preserve typed results and errors");
+	const sourcesBefore = await (await invoke(first.session, "get_kubeconfig_sources", {})).json();
+	const sourceMutations: Array<[string, JsonValue]> = [
+		["set_kubeconfig_env_var", { envVar: "KUBECOVE_SMOKE_CONFIG" }],
+		["add_kubeconfig_paths", { paths: [fixtureConfig] }],
+		["remove_kubeconfig_path", { path: fixtureConfig }],
+		["reorder_kubeconfig_paths", { paths: [] }],
+		["set_show_kubeconfig_source_labels", { show: false }],
+	];
+	for (const [command, args] of sourceMutations) {
+		const response = await invoke(first.session, command, args);
+		assert.equal((await response.json()).kind, "unsupportedOperation", command);
+	}
+	assert.deepEqual(await (await invoke(first.session, "get_kubeconfig_sources", {})).json(), sourcesBefore);
+	checks.push("Server users cannot change operator kubeconfig sources or labels");
 	// Failure contract: a denied type or namespace cannot discard readable rows,
 	// claim reconciliation coverage, or turn authentication failures into empty success.
 	const unauthorized = await invoke(first.session, "list_resource_scope", { clusterContext: "fixture", requests: [{ kind: "Pod", namespace: "unauthorized" }], kubeconfigEnvVar: "KUBECOVE_SMOKE_CONFIG" });
