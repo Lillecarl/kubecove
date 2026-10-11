@@ -18,7 +18,7 @@ use axum::{
         rejection::{JsonRejection, QueryRejection},
         Path, Query, State,
     },
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -102,6 +102,17 @@ async fn guard(
     mut request: axum::extract::Request,
     next: Next,
 ) -> Response {
+    // HTTP/2 sends the host as `:authority`, which hyper puts in the URI,
+    // and no Host header (RFC 9113, section 8.3.1).
+    if !request.headers().contains_key(header::HOST) {
+        if let Some(host) = request
+            .uri()
+            .authority()
+            .and_then(|authority| HeaderValue::from_str(authority.as_str()).ok())
+        {
+            request.headers_mut().insert(header::HOST, host);
+        }
+    }
     let path = request.uri().path();
     let needs_origin = request.method() == axum::http::Method::POST || path == "/api/v1/channels";
     if ((state.access.is_some() || state.oidc.is_some())
