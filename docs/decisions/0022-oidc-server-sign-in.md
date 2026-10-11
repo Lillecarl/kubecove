@@ -10,7 +10,8 @@ The headless server supports one configured OpenID Connect issuer as an alternat
 to startup-token or Cloudflare Access authentication. These modes are mutually
 exclusive. OIDC authenticates browser users. Kubernetes requests continue to use
 the server's configured credentials, including an operator-granted cluster-admin
-service account. This remains a shared backend with one active owner.
+service account. This is shared operator configuration with independent browser
+sessions, as defined by ADR 0020's session amendment.
 
 Use authorization code flow with PKCE S256 and a nonce. The operator registers
 `<public-origin>/api/v1/oidc/callback` as the exact redirect URI. OIDC requires native
@@ -44,8 +45,11 @@ bound to the verified identity. Protected HTTP requests and WebSocket upgrades
 require the authentication cookie. WebSockets close on expiry or local logout.
 The existing owner grace and cleanup rules still apply on disconnect.
 
-Local logout revokes the authentication credential, clears cookies and ends only
-the matching owned session. It does not log the user out of the identity provider.
+Local logout revokes the current sign-in's authentication credential, clears its
+bound Kubernetes bearer slots and cookies, and ends the session identified by a
+matching resume token. Other sockets using that credential close and follow the
+disconnect grace policy. Separate sign-ins remain valid, including those for the
+same subject. Logout does not log the user out of the identity provider.
 Callback errors never echo provider errors, authorization codes or credentials.
 Redirect successful callbacks to `/` to remove protocol parameters from the page.
 Keep Host/Origin checks, exact-origin CSP, no-referrer and no-store responses.

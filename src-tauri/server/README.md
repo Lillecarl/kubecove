@@ -61,8 +61,11 @@ OIDC is mutually exclusive with Cloudflare Access. It generates no startup token
 By default it authenticates KubeCove users only; Kubernetes uses the server's
 credentials. With `--oidc-kubernetes-credentials <AUD>`, Kubernetes instead receives
 each session's verified user ID token. Transient provider outages suspend expired
-tokens and retry within the existing sign-in deadline. Browser logout
-revokes the cookie and closes that user's sessions. Native desktop remote connections
+tokens and retry within the existing sign-in deadline. Browser logout revokes the
+current sign-in, clears its bound Kubernetes bearer slots and cookies, and closes
+the session identified by a matching resume token. Other sockets using that sign-in
+close and follow the disconnect grace policy; separate sign-ins remain valid.
+Native desktop remote connections
 require token mode. The [deployment guide](../../deploy/README.md#openid-connect-with-authentik)
 has an Authentik example behind Cloudflare Tunnel.
 
