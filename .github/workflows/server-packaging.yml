@@ -6,7 +6,9 @@ on:
       release-tag:
         type: string
         required: true
-  pull_request:
+  # Packaging runs on main and release tags, not on pull requests.
+  push:
+    branches: [main]
     paths:
       - .github/workflows/server-packaging.yml
       - .github/workflows/release.yml
